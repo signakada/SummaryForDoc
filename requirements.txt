@@ -1,0 +1,18 @@
+# 医療文書要約ツール - 必要なライブラリ
+
+# GUI Framework (クロスプラットフォーム対応)
+flet>=0.24.0
+
+# AI API
+anthropic>=0.39.0
+openai>=1.54.0
+
+# PDF処理
+PyPDF2>=3.0.0
+
+# 画像処理・OCR
+Pillow>=10.0.0
+pytesseract>=0.3.10
+
+# その他
+python-dotenv>=1.0.0
