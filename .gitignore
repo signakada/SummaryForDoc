@@ -58,3 +58,4 @@ tests/*.jpg
 tests/*.png
 !tests/sample_*.txt
 nano.env
+nano.env
