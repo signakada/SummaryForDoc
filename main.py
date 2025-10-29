@@ -6,6 +6,8 @@ Mac・Windows・Linux対応
 import flet as ft
 from pathlib import Path
 from typing import List
+import subprocess
+import platform
 
 from src.config import config
 from src.file_reader import FileReader
@@ -70,20 +72,80 @@ class MedicalSummarizerApp:
             "医療文書要約ツール",
             size=28,
             weight=ft.FontWeight.BOLD,
-            color=ft.colors.BLUE_700
+            color="#1976d2"  # BLUE_700
         )
 
         # ファイル選択エリア
-        file_picker = ft.FilePicker(on_result=self._on_file_picked)
-        self.page.overlay.append(file_picker)
+        def open_file_picker(e):
+            print("ファイル選択ボタンがクリックされました")  # デバッグ
+            try:
+                file_paths = []
+
+                # macOSの場合はosascriptを使用
+                if platform.system() == "Darwin":
+                    applescript = '''
+                    tell application "System Events"
+                        activate
+                        set fileList to choose file with prompt "ファイルを選択してください（txt, pdf, jpg, png）" of type {"txt", "pdf", "public.image"} with multiple selections allowed
+                        set filePaths to {}
+                        repeat with aFile in fileList
+                            set end of filePaths to POSIX path of aFile
+                        end repeat
+                        return filePaths
+                    end tell
+                    '''
+
+                    result = subprocess.run(
+                        ['osascript', '-e', applescript],
+                        capture_output=True,
+                        text=True,
+                        timeout=300
+                    )
+
+                    if result.returncode == 0 and result.stdout.strip():
+                        # 結果を解析（カンマ区切りのパス）
+                        output = result.stdout.strip()
+                        if output:
+                            # "path1, path2, path3"の形式を分割
+                            file_paths = [p.strip() for p in output.split(',')]
+                    else:
+                        print("ファイル選択がキャンセルされました")
+                        return
+                else:
+                    # Windows/Linuxの場合のフォールバック
+                    self.page.show_snack_bar(
+                        ft.SnackBar(content=ft.Text("このプラットフォームではファイル選択がサポートされていません"))
+                    )
+                    return
+
+                if file_paths:
+                    print(f"{len(file_paths)}個のファイルが選択されました")
+                    for file_path_str in file_paths:
+                        file_path = Path(file_path_str)
+                        if file_path.exists() and file_path not in self.selected_files:
+                            self.selected_files.append(file_path)
+                            print(f"ファイルを追加: {file_path.name}")
+
+                    self._update_file_list()
+                    self.process_button.disabled = len(self.selected_files) == 0
+                    self.page.update()
+                else:
+                    print("ファイルが選択されませんでした")
+
+            except subprocess.TimeoutExpired:
+                print("ファイル選択がタイムアウトしました")
+            except Exception as ex:
+                print(f"ファイルピッカーエラー: {ex}")
+                import traceback
+                traceback.print_exc()
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text(f"ファイル選択エラー: {str(ex)}"))
+                )
 
         pick_button = ft.ElevatedButton(
-            "ファイルを選択",
-            icon=ft.icons.UPLOAD_FILE,
-            on_click=lambda _: file_picker.pick_files(
-                allowed_extensions=["txt", "pdf", "jpg", "jpeg", "png"],
-                allow_multiple=True
-            )
+            "ファイルを選択 (txt, pdf, jpg, png)",
+            icon="upload_file",
+            on_click=open_file_picker
         )
 
         # ファイルリスト表示
@@ -96,7 +158,7 @@ class MedicalSummarizerApp:
                 pick_button
             ]),
             padding=15,
-            border=ft.border.all(1, ft.colors.BLUE_200),
+            border=ft.border.all(1, "#90caf9"),  # BLUE_200
             border_radius=10,
         )
 
@@ -138,25 +200,25 @@ class MedicalSummarizerApp:
                 self.template_dropdown,
             ]),
             padding=15,
-            border=ft.border.all(1, ft.colors.BLUE_200),
+            border=ft.border.all(1, "#90caf9"),  # BLUE_200
             border_radius=10,
         )
 
         # 実行ボタン
         self.process_button = ft.ElevatedButton(
             "個人情報を削除して要約作成",
-            icon=ft.icons.PLAY_ARROW,
+            icon="play_arrow",
             on_click=self._on_process,
             style=ft.ButtonStyle(
-                color=ft.colors.WHITE,
-                bgcolor=ft.colors.BLUE_700,
+                color="#ffffff",  # WHITE
+                bgcolor="#1976d2",  # BLUE_700
             ),
             height=50,
             disabled=True
         )
 
         # ステータステキスト
-        self.status_text = ft.Text("", size=14, color=ft.colors.GREY_700)
+        self.status_text = ft.Text("", size=14, color="#616161")  # GREY_700
 
         # 結果表示エリア
         self.result_container = ft.Column(spacing=15)
@@ -173,25 +235,13 @@ class MedicalSummarizerApp:
             self.result_container
         )
 
-    def _on_file_picked(self, e: ft.FilePickerResultEvent):
-        """ファイルが選択されたときの処理"""
-        if e.files:
-            for file in e.files:
-                file_path = Path(file.path)
-                if file_path not in self.selected_files:
-                    self.selected_files.append(file_path)
-
-            self._update_file_list()
-            self.process_button.disabled = len(self.selected_files) == 0
-            self.page.update()
-
     def _update_file_list(self):
         """ファイルリストを更新"""
         self.file_list.controls.clear()
 
         if not self.selected_files:
             self.file_list.controls.append(
-                ft.Text("（ファイルが選択されていません）", color=ft.colors.GREY_500)
+                ft.Text("（ファイルが選択されていません）", color="#9e9e9e")  # GREY_500
             )
         else:
             for i, file_path in enumerate(self.selected_files):
@@ -204,11 +254,11 @@ class MedicalSummarizerApp:
                     return handler
 
                 file_row = ft.Row([
-                    ft.Icon(ft.icons.DESCRIPTION, size=20, color=ft.colors.BLUE_400),
+                    ft.Icon("description", size=20, color="#42a5f5"),  # BLUE_400
                     ft.Text(file_path.name, expand=True),
                     ft.IconButton(
-                        icon=ft.icons.DELETE,
-                        icon_color=ft.colors.RED_400,
+                        icon="delete",
+                        icon_color="#ef5350",  # RED_400
                         tooltip="削除",
                         on_click=make_remove_handler(i)
                     )
@@ -260,11 +310,11 @@ class MedicalSummarizerApp:
             saved_files = summarizer.save_results(self.summary_result)
 
             self.status_text.value = f"✅ 完了しました！ ({len(saved_files)}件のファイルを保存)"
-            self.status_text.color = ft.colors.GREEN_700
+            self.status_text.color = "#388e3c"  # GREEN_700
 
         except Exception as ex:
             self.status_text.value = f"❌ エラー: {str(ex)}"
-            self.status_text.color = ft.colors.RED_700
+            self.status_text.color = "#d32f2f"  # RED_700
 
         finally:
             self.process_button.disabled = False
@@ -280,7 +330,7 @@ class MedicalSummarizerApp:
                 self._create_result_card(
                     "病歴",
                     self.summary_result.history,
-                    ft.colors.BLUE_50
+                    "#e3f2fd"  # BLUE_50
                 )
             )
 
@@ -290,7 +340,7 @@ class MedicalSummarizerApp:
                 self._create_result_card(
                     "症状の詳細",
                     self.summary_result.symptoms,
-                    ft.colors.GREEN_50
+                    "#e8f5e9"  # GREEN_50
                 )
             )
 
@@ -300,7 +350,7 @@ class MedicalSummarizerApp:
                 self._create_result_card(
                     "全期間サマリー",
                     self.summary_result.full_summary,
-                    ft.colors.ORANGE_50
+                    "#fff3e0"  # ORANGE_50
                 )
             )
 
@@ -317,14 +367,14 @@ class MedicalSummarizerApp:
                 ft.Row([
                     ft.Text(title, size=18, weight=ft.FontWeight.BOLD),
                     ft.IconButton(
-                        icon=ft.icons.COPY,
+                        icon="copy",
                         tooltip="コピー",
                         on_click=copy_to_clipboard
                     )
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Divider(),
                 ft.Text(content, size=14, selectable=True),
-                ft.Text(f"({len(content)}文字)", size=12, color=ft.colors.GREY_600)
+                ft.Text(f"({len(content)}文字)", size=12, color="#757575")  # GREY_600
             ]),
             padding=15,
             bgcolor=bg_color,
