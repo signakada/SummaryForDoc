@@ -28,6 +28,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env.example
+nano.env
 
 # 出力ファイル
 output/*.txt
@@ -55,3 +57,4 @@ tests/*.pdf
 tests/*.jpg
 tests/*.png
 !tests/sample_*.txt
+nano.env
