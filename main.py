@@ -9,6 +9,13 @@ from typing import List
 import subprocess
 import platform
 
+try:
+    import flet_dropzone as ftd
+    DROPZONE_AVAILABLE = True
+except ImportError:
+    DROPZONE_AVAILABLE = False
+    print("⚠️  flet-dropzone が利用できません。ビルド版では動作します。")
+
 from src.config import config
 from src.file_reader import FileReader
 from src.pii_remover import PIIRemover
@@ -155,31 +162,54 @@ class MedicalSummarizerApp:
         # ファイルリスト表示
         self.file_list = ft.Column(spacing=5)
 
-        # ファイル選択エリア（視覚的にわかりやすく）
-        file_select_area = ft.Container(
-            content=ft.Column([
-                ft.Icon("cloud_upload", size=48, color="#1976d2"),
-                ft.Text("ファイルを選択してください", size=16, weight=ft.FontWeight.BOLD, color="#1976d2"),
-                ft.Text("txt, pdf, jpg, png に対応", size=12, color="#616161"),
-                ft.ElevatedButton(
-                    "📁 ファイルを選択",
-                    icon="upload_file",
-                    on_click=open_file_picker,
-                    style=ft.ButtonStyle(
-                        bgcolor="#1976d2",
-                        color="#ffffff",
-                    ),
+        # ファイル選択エリアのコンテンツ
+        file_select_content = ft.Column([
+            ft.Icon("cloud_upload", size=48, color="#1976d2"),
+            ft.Text(
+                "ファイルをここにドラッグ&ドロップ" if DROPZONE_AVAILABLE else "ファイルを選択してください",
+                size=16,
+                weight=ft.FontWeight.BOLD,
+                color="#1976d2"
+            ),
+            ft.Text("txt, pdf, jpg, png に対応", size=12, color="#616161"),
+            ft.ElevatedButton(
+                "📁 ファイルを選択",
+                icon="upload_file",
+                on_click=open_file_picker,
+                style=ft.ButtonStyle(
+                    bgcolor="#1976d2",
+                    color="#ffffff",
                 ),
-            ],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=10),
-            width=None,
-            height=180,
-            alignment=ft.alignment.center,
-            bgcolor="#e3f2fd",  # BLUE_50
-            border=ft.border.all(2, "#90caf9"),  # BLUE_200
-            border_radius=10,
-        )
+            ),
+        ],
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        spacing=10)
+
+        # ドロップゾーンが利用可能な場合は、ドラッグ&ドロップ対応エリアを作成
+        if DROPZONE_AVAILABLE:
+            file_select_area = ftd.Dropzone(
+                content=ft.Container(
+                    content=file_select_content,
+                    width=None,
+                    height=180,
+                    alignment=ft.alignment.center,
+                    bgcolor="#e3f2fd",  # BLUE_50
+                    border=ft.border.all(2, "#90caf9"),  # BLUE_200
+                    border_radius=10,
+                ),
+                on_dropped=self._on_file_dropped,
+            )
+        else:
+            # ドロップゾーンが利用できない場合は通常のコンテナ
+            file_select_area = ft.Container(
+                content=file_select_content,
+                width=None,
+                height=180,
+                alignment=ft.alignment.center,
+                bgcolor="#e3f2fd",  # BLUE_50
+                border=ft.border.all(2, "#90caf9"),  # BLUE_200
+                border_radius=10,
+            )
 
         file_section = ft.Container(
             content=ft.Column([
@@ -275,6 +305,29 @@ class MedicalSummarizerApp:
             ft.Divider(),
             self.result_container
         )
+
+    def _on_file_dropped(self, e):
+        """ファイルがドロップされたときの処理"""
+        if not hasattr(e, 'files') or not e.files:
+            print("ファイルがドロップされませんでした")
+            return
+
+        print(f"ドロップされたファイル: {e.files}")
+
+        # ドロップされたファイルを追加
+        for file_path_str in e.files:
+            file_path = Path(file_path_str)
+            if file_path.exists() and file_path not in self.selected_files:
+                # サポートされているファイル形式かチェック
+                if file_path.suffix.lower() in ['.txt', '.pdf', '.jpg', '.jpeg', '.png']:
+                    self.selected_files.append(file_path)
+                    print(f"ファイルを追加: {file_path.name}")
+                else:
+                    print(f"サポートされていないファイル形式: {file_path.suffix}")
+
+        self._update_file_list()
+        self.process_button.disabled = len(self.selected_files) == 0
+        self.page.update()
 
     def _update_file_list(self):
         """ファイルリストを更新"""
