@@ -241,12 +241,22 @@ class MedicalSummarizerApp:
             value=True
         )
 
-        # テンプレート選択
+        # テンプレート選択（カスタムプロンプトを含む）
+        from src.prompts import PromptManager
+
         template_options = [
             ft.dropdown.Option(key="disability_pension", text="障害年金診断書（標準）"),
             ft.dropdown.Option(key="mental_health_handbook", text="精神障害者保健福祉手帳"),
             ft.dropdown.Option(key="self_support_medical", text="自立支援医療"),
         ]
+
+        # カスタムプロンプトを追加
+        all_templates = PromptManager.get_all_templates()
+        for key, template in all_templates.items():
+            if template.is_custom:
+                template_options.append(
+                    ft.dropdown.Option(key=key, text=f"📝 {template.name}")
+                )
 
         self.template_dropdown = ft.Dropdown(
             label="テンプレート",
@@ -903,7 +913,56 @@ class MedicalSummarizerApp:
             color="#1976d2"
         )
 
-        # 現在の設定を取得
+        # 戻るボタン（共通）
+        def back_to_main(e):
+            self.page.clean()
+            # メイン画面を再構築してカスタムプロンプトを反映
+            self.main_view = None  # ビューをクリア
+            self._build_ui()
+            self.page.update()
+
+        back_button = ft.ElevatedButton(
+            "戻る",
+            icon="arrow_back",
+            on_click=back_to_main,
+            style=ft.ButtonStyle(
+                color="#1976d2",
+                bgcolor="#e3f2fd",
+            ),
+        )
+
+        # タブを作成
+        tabs = ft.Tabs(
+            selected_index=0,
+            animation_duration=300,
+            tabs=[
+                ft.Tab(
+                    text="API設定",
+                    icon="key",
+                    content=self._create_api_settings_content()
+                ),
+                ft.Tab(
+                    text="カスタムプロンプト",
+                    icon="edit_note",
+                    content=self._create_custom_prompt_content()
+                ),
+            ],
+        )
+
+        # レイアウト
+        self.page.add(
+            ft.Container(
+                content=ft.Column([
+                    ft.Row([title, back_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Divider(),
+                    tabs,
+                ]),
+                padding=40,
+            )
+        )
+
+    def _create_api_settings_content(self):
+        """API設定タブのコンテンツを作成"""
         config_manager = config.get_config_manager()
         current_anthropic_key = config_manager.get_anthropic_api_key() or ""
         current_openai_key = config_manager.get_openai_api_key() or ""
@@ -952,7 +1011,7 @@ class MedicalSummarizerApp:
         )
 
         # プロバイダー変更時の処理
-        def update_model_options():
+        def update_model_options(update_page=True):
             if provider_dropdown.value == "anthropic":
                 model_dropdown.options = [
                     ft.dropdown.Option("claude-3-5-haiku-20241022", "Claude 3.5 Haiku (高速・低コスト)"),
@@ -969,10 +1028,11 @@ class MedicalSummarizerApp:
                 ]
                 if model_dropdown.value not in ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]:
                     model_dropdown.value = "gpt-4o-mini"
-            self.page.update()
+            if update_page:
+                self.page.update()
 
         provider_dropdown.on_change = lambda e: update_model_options()
-        update_model_options()  # 初期表示時に実行
+        update_model_options(update_page=False)  # 初期表示時はページ更新しない
 
         # 保存ボタン
         def save_settings(e):
@@ -1011,14 +1071,6 @@ class MedicalSummarizerApp:
                     ft.SnackBar(content=ft.Text("設定の保存に失敗しました"))
                 )
 
-        # 戻るボタン
-        def back_to_main(e):
-            self.page.clean()
-            if self.main_view:
-                for control in self.main_view:
-                    self.page.add(control)
-            self.page.update()
-
         save_button = ft.ElevatedButton(
             "保存",
             icon="save",
@@ -1029,21 +1081,297 @@ class MedicalSummarizerApp:
             ),
         )
 
-        back_button = ft.ElevatedButton(
-            "戻る",
-            icon="arrow_back",
-            on_click=back_to_main,
-            style=ft.ButtonStyle(
-                color="#1976d2",
-                bgcolor="#e3f2fd",
-            ),
-        )
-
         # 設定ファイルの場所を表示
         config_location = ft.Text(
             f"設定ファイル: {config_manager.config_file}",
             size=12,
             color="#757575"
+        )
+
+        # コンテンツを返す
+        return ft.Container(
+            content=ft.Column([
+                provider_dropdown,
+                ft.Container(height=10),
+                anthropic_key_field,
+                ft.Container(height=10),
+                openai_key_field,
+                ft.Container(height=10),
+                model_dropdown,
+                ft.Container(height=20),
+                save_button,
+                ft.Container(height=20),
+                config_location,
+            ]),
+            padding=20,
+        )
+
+    def _create_custom_prompt_content(self):
+        """カスタムプロンプトタブのコンテンツを作成"""
+        config_manager = config.get_config_manager()
+
+        # プロンプト一覧
+        prompt_list = ft.Column(spacing=10)
+
+        def refresh_prompt_list():
+            """プロンプト一覧を更新"""
+            prompt_list.controls.clear()
+            custom_prompts = config_manager.get_custom_prompts()
+
+            if not custom_prompts:
+                prompt_list.controls.append(
+                    ft.Text("カスタムプロンプトがありません", color="#9e9e9e")
+                )
+            else:
+                for key, prompt_data in custom_prompts.items():
+                    def make_edit_handler(prompt_key):
+                        def handler(e):
+                            self._show_prompt_editor(prompt_key)
+                        return handler
+
+                    def make_delete_handler(prompt_key):
+                        def handler(e):
+                            if config_manager.delete_custom_prompt(prompt_key):
+                                # PromptManagerを再読み込み
+                                from src.prompts import PromptManager
+                                PromptManager.reload_custom_prompts()
+                                # 一覧を更新
+                                refresh_prompt_list()
+                                self.page.show_snack_bar(
+                                    ft.SnackBar(content=ft.Text("プロンプトを削除しました"))
+                                )
+                            else:
+                                self.page.show_snack_bar(
+                                    ft.SnackBar(content=ft.Text("削除に失敗しました"))
+                                )
+                        return handler
+
+                    prompt_card = ft.Container(
+                        content=ft.Row([
+                            ft.Icon("edit_note", size=20, color="#1976d2"),
+                            ft.Text(prompt_data.get('name', '無題'), expand=True),
+                            ft.IconButton(
+                                icon="edit",
+                                icon_color="#1976d2",
+                                tooltip="編集",
+                                on_click=make_edit_handler(key)
+                            ),
+                            ft.IconButton(
+                                icon="delete",
+                                icon_color="#ef5350",
+                                tooltip="削除",
+                                on_click=make_delete_handler(key)
+                            )
+                        ]),
+                        bgcolor="#e3f2fd",
+                        padding=10,
+                        border_radius=5,
+                    )
+                    prompt_list.controls.append(prompt_card)
+
+            self.page.update()
+
+        # 初期表示（初回はpage.update()を呼ばない）
+        custom_prompts = config_manager.get_custom_prompts()
+        if not custom_prompts:
+            prompt_list.controls.append(
+                ft.Text("カスタムプロンプトがありません", color="#9e9e9e")
+            )
+        else:
+            for key, prompt_data in custom_prompts.items():
+                def make_edit_handler(prompt_key):
+                    def handler(e):
+                        self._show_prompt_editor(prompt_key)
+                    return handler
+
+                def make_delete_handler(prompt_key):
+                    def handler(e):
+                        if config_manager.delete_custom_prompt(prompt_key):
+                            # PromptManagerを再読み込み
+                            from src.prompts import PromptManager
+                            PromptManager.reload_custom_prompts()
+                            # 一覧を更新
+                            refresh_prompt_list()
+                            self.page.show_snack_bar(
+                                ft.SnackBar(content=ft.Text("プロンプトを削除しました"))
+                            )
+                        else:
+                            self.page.show_snack_bar(
+                                ft.SnackBar(content=ft.Text("削除に失敗しました"))
+                            )
+                    return handler
+
+                prompt_card = ft.Container(
+                    content=ft.Row([
+                        ft.Icon("edit_note", size=20, color="#1976d2"),
+                        ft.Text(prompt_data.get('name', '無題'), expand=True),
+                        ft.IconButton(
+                            icon="edit",
+                            icon_color="#1976d2",
+                            tooltip="編集",
+                            on_click=make_edit_handler(key)
+                        ),
+                        ft.IconButton(
+                            icon="delete",
+                            icon_color="#ef5350",
+                            tooltip="削除",
+                            on_click=make_delete_handler(key)
+                        )
+                    ]),
+                    bgcolor="#e3f2fd",
+                    padding=10,
+                    border_radius=5,
+                )
+                prompt_list.controls.append(prompt_card)
+
+        # 新規作成ボタン
+        def create_new_prompt(e):
+            self._show_prompt_editor(None)
+
+        create_button = ft.ElevatedButton(
+            "新規プロンプト作成",
+            icon="add",
+            on_click=create_new_prompt,
+            style=ft.ButtonStyle(
+                color="#ffffff",
+                bgcolor="#1976d2",
+            ),
+        )
+
+        return ft.Container(
+            content=ft.Column([
+                create_button,
+                ft.Divider(),
+                ft.Text("カスタムプロンプト一覧", size=16, weight=ft.FontWeight.BOLD),
+                prompt_list,
+            ]),
+            padding=20,
+        )
+
+    def _show_prompt_editor(self, prompt_key=None):
+        """プロンプト編集画面を表示"""
+        config_manager = config.get_config_manager()
+
+        # 編集の場合は既存のプロンプトを読み込む
+        if prompt_key:
+            custom_prompts = config_manager.get_custom_prompts()
+            prompt_data = custom_prompts.get(prompt_key, {})
+            title_text = "プロンプトを編集"
+        else:
+            prompt_data = {}
+            title_text = "新規プロンプト作成"
+
+        self.page.clean()
+
+        # タイトル
+        title = ft.Text(
+            title_text,
+            size=24,
+            weight=ft.FontWeight.BOLD,
+            color="#1976d2"
+        )
+
+        # 名前入力
+        name_field = ft.TextField(
+            label="プロンプト名",
+            value=prompt_data.get('name', ''),
+            width=500,
+            border_color="#1976d2",
+        )
+
+        # 病歴プロンプト入力
+        history_prompt_field = ft.TextField(
+            label="病歴用プロンプト",
+            value=prompt_data.get('history_prompt', ''),
+            multiline=True,
+            min_lines=5,
+            max_lines=10,
+            border_color="#1976d2",
+            hint_text="「{text}」を含めることで、文書の内容が挿入されます"
+        )
+
+        # 症状プロンプト入力
+        symptoms_prompt_field = ft.TextField(
+            label="症状用プロンプト",
+            value=prompt_data.get('symptoms_prompt', ''),
+            multiline=True,
+            min_lines=5,
+            max_lines=10,
+            border_color="#1976d2",
+            hint_text="「{text}」を含めることで、文書の内容が挿入されます"
+        )
+
+        # サマリープロンプト入力
+        summary_prompt_field = ft.TextField(
+            label="サマリー用プロンプト",
+            value=prompt_data.get('summary_prompt', ''),
+            multiline=True,
+            min_lines=5,
+            max_lines=10,
+            border_color="#1976d2",
+            hint_text="「{text}」を含めることで、文書の内容が挿入されます"
+        )
+
+        # 保存ボタン
+        def save_prompt(e):
+            name = name_field.value
+            if not name or not name.strip():
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("プロンプト名を入力してください"))
+                )
+                return
+
+            # キーを生成（新規の場合）
+            if not prompt_key:
+                import time
+                new_key = f"prompt_{int(time.time())}"
+            else:
+                new_key = prompt_key
+
+            # プロンプトを保存
+            if config_manager.save_custom_prompt(
+                key=new_key,
+                name=name.strip(),
+                history_prompt=history_prompt_field.value or '',
+                symptoms_prompt=symptoms_prompt_field.value or '',
+                summary_prompt=summary_prompt_field.value or ''
+            ):
+                # PromptManagerを再読み込み
+                from src.prompts import PromptManager
+                PromptManager.reload_custom_prompts()
+
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("プロンプトを保存しました"))
+                )
+                # 設定画面に戻る
+                self._show_settings_screen()
+            else:
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("保存に失敗しました"))
+                )
+
+        # キャンセルボタン
+        def cancel_edit(e):
+            self._show_settings_screen()
+
+        save_button = ft.ElevatedButton(
+            "保存",
+            icon="save",
+            on_click=save_prompt,
+            style=ft.ButtonStyle(
+                color="#ffffff",
+                bgcolor="#1976d2",
+            ),
+        )
+
+        cancel_button = ft.ElevatedButton(
+            "キャンセル",
+            icon="cancel",
+            on_click=cancel_edit,
+            style=ft.ButtonStyle(
+                color="#1976d2",
+                bgcolor="#e3f2fd",
+            ),
         )
 
         # レイアウト
@@ -1052,18 +1380,16 @@ class MedicalSummarizerApp:
                 content=ft.Column([
                     title,
                     ft.Divider(),
-                    provider_dropdown,
+                    name_field,
                     ft.Container(height=10),
-                    anthropic_key_field,
+                    history_prompt_field,
                     ft.Container(height=10),
-                    openai_key_field,
+                    symptoms_prompt_field,
                     ft.Container(height=10),
-                    model_dropdown,
-                    ft.Container(height=10),
-                    ft.Row([save_button, back_button], spacing=10),
+                    summary_prompt_field,
                     ft.Container(height=20),
-                    config_location,
-                ]),
+                    ft.Row([save_button, cancel_button], spacing=10),
+                ], scroll=ft.ScrollMode.AUTO),
                 padding=40,
             )
         )

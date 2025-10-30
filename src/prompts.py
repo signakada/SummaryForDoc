@@ -15,6 +15,7 @@ class PromptTemplate:
     history_prompt: str  # 病歴用プロンプト
     symptoms_prompt: str  # 症状の詳細用プロンプト
     summary_prompt: str  # 全期間サマリー用プロンプト
+    is_custom: bool = False  # カスタムプロンプトかどうか
 
 
 class PromptManager:
@@ -22,6 +23,7 @@ class PromptManager:
 
     # テンプレート定義
     TEMPLATES: Dict[str, PromptTemplate] = {}
+    _custom_loaded: bool = False  # カスタムプロンプトが読み込まれたか
 
     @classmethod
     def initialize_templates(cls):
@@ -202,11 +204,47 @@ class PromptManager:
         return cls.TEMPLATES[template_key]
 
     @classmethod
+    def load_custom_prompts(cls):
+        """カスタムプロンプトを読み込む"""
+        from .config import config
+
+        config_manager = config.get_config_manager()
+        custom_prompts = config_manager.get_custom_prompts()
+
+        for key, prompt_data in custom_prompts.items():
+            # カスタムプロンプトのキーには "custom_" プレフィックスを付ける
+            custom_key = f"custom_{key}"
+            cls.TEMPLATES[custom_key] = PromptTemplate(
+                name=prompt_data.get('name', 'カスタムプロンプト'),
+                description='カスタムプロンプト',
+                history_prompt=prompt_data.get('history_prompt', ''),
+                symptoms_prompt=prompt_data.get('symptoms_prompt', ''),
+                summary_prompt=prompt_data.get('summary_prompt', ''),
+                is_custom=True
+            )
+
+        cls._custom_loaded = True
+
+    @classmethod
     def get_all_templates(cls) -> Dict[str, PromptTemplate]:
-        """すべてのテンプレートを取得"""
+        """すべてのテンプレートを取得（カスタムプロンプトを含む）"""
         if not cls.TEMPLATES:
             cls.initialize_templates()
+
+        # カスタムプロンプトをまだ読み込んでいない場合は読み込む
+        if not cls._custom_loaded:
+            cls.load_custom_prompts()
+
         return cls.TEMPLATES
+
+    @classmethod
+    def reload_custom_prompts(cls):
+        """カスタムプロンプトを再読み込み"""
+        # 既存のカスタムプロンプトを削除
+        cls.TEMPLATES = {k: v for k, v in cls.TEMPLATES.items() if not v.is_custom}
+        cls._custom_loaded = False
+        # 再読み込み
+        cls.load_custom_prompts()
 
     @classmethod
     def get_template_names(cls) -> List[str]:
