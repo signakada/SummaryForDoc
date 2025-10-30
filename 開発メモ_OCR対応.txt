@@ -1,6 +1,6 @@
 # SummaryForDoc - 開発経過メモ（OCR対応）
 
-## 現在の状況（2025-10-30）
+## 現在の状況（2025-10-30 更新）
 
 ### 完成済みの機能
 1. ✅ ドラッグ&ドロップでのファイル読み込み機能
@@ -17,144 +17,92 @@
 4. ✅ テキストファイルの読み込みと要約
    - 複数エンコーディング対応（UTF-8, Shift_JIS, など）
 
-### 未解決の問題
+5. ✅ **OCR機能（画像からテキスト抽出）** ← 2025-10-30 解決！
+   - JPEG/PNG画像ファイルのOCR処理が正常動作
+   - 日本語・英語の両方に対応
+   - Tesseractをアプリバンドルに統合完了
 
-#### OCR機能が動作しない
+### 解決済みの問題
+
+#### OCR機能が動作しなかった問題 → ✅ 解決
 - **症状**: JPEG/PNG画像ファイルをドラッグ&ドロップすると「すべてのファイル読み込みに失敗しました」エラー
-- **期待動作**: 画像からテキストを抽出して要約
+- **原因**: Tesseractの依存ライブラリが不足していた
+  - libtesseract.5.dylib (Tesseractコアライブラリ) が未コピー
+  - libleptonica.6.dylib (画像処理ライブラリ) が未コピー
+  - libarchive.13.dylib (アーカイブ処理ライブラリ) が未コピー
+  - Tesseractバイナリが絶対パスで依存ライブラリを参照していた
 
-#### 実施済みの対策
-1. Tesseractバイナリをアプリバンドルにコピー
-   - 場所: build/macos/SummaryForDoc.app/Contents/Resources/tesseract/
-   - ファイル: tesseract (84KB), eng.traineddata (3.9MB), jpn.traineddata (2.4MB)
+#### 実施した解決策
+1. **copy_tesseract.sh スクリプトの大幅改修**
+   - すべての依存ライブラリをコピーするように修正
+   - libtesseract.5.dylib, libleptonica.6.dylib, libarchive.13.dylib を追加
+   - 画像処理関連ライブラリも追加（libjpeg, libpng, libtiff, libwebp, libgif, libopenjp2, libzstd）
+   - install_name_tool でライブラリ参照パスを絶対パスから相対パスに変更
+   - @executable_path/../Resources/tesseract/lib/ への参照に変更
 
-2. src/file_reader.py の修正
-   - _setup_tesseract() メソッドを追加
-   - sys.frozen でビルド版を検知
-   - バンドル内のTesseractパスを設定
+2. **src/file_reader.py にデバッグログを追加**
+   - _setup_tesseract() メソッドに詳細なログ出力を追加
+   - sys.frozen, base_path, tesseract_cmd の確認が可能に
 
-3. copy_tesseract.sh スクリプト作成
-   - Tesseractを自動コピーするスクリプト
-   - 実行済み、ファイルはコピー完了
-
-## 次回の課題
-
-### 1. OCR失敗の原因調査
-
-#### 確認すべきポイント
-a) Tesseractのパス設定が正しいか
-   - sys._MEIPASS の値を確認
-   - sys.executable の位置を確認
-   - 実際のTesseractパスがコードと一致しているか
-
-b) Tesseractの実行権限
-   - tesseractバイナリに実行権限があるか確認済み (chmod +x 済み)
-   - macOSのセキュリティ制限（Gatekeeper）の影響がないか
-
-c) TESSDATA_PREFIX 環境変数
-   - 正しく設定されているか
-   - Tesseractが学習データを見つけられるか
-
-d) 依存ライブラリ
-   - copy_tesseract.sh でコピーした .dylib ファイルが必要か
-   - leptonica, libjpeg, libpng, libtiff
-
-#### デバッグ方法の提案
-
-**方法1: ログ出力を追加**
-src/file_reader.py の _setup_tesseract() にデバッグログを追加：
-
-```python
-@staticmethod
-def _setup_tesseract():
-    """Tesseractの実行ファイルとデータパスを設定"""
-    print(f"DEBUG: sys.frozen = {getattr(sys, 'frozen', False)}")
-
-    if getattr(sys, 'frozen', False):
-        base_path = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
-        print(f"DEBUG: base_path = {base_path}")
-
-        tesseract_cmd = base_path / 'tesseract' / 'tesseract'
-        tessdata_dir = base_path / 'tesseract' / 'tessdata'
-
-        print(f"DEBUG: tesseract_cmd = {tesseract_cmd}")
-        print(f"DEBUG: tesseract_cmd.exists() = {tesseract_cmd.exists()}")
-        print(f"DEBUG: tessdata_dir = {tessdata_dir}")
-        print(f"DEBUG: tessdata_dir.exists() = {tessdata_dir.exists()}")
-
-        if tesseract_cmd.exists():
-            pytesseract.pytesseract.tesseract_cmd = str(tesseract_cmd)
-            os.environ['TESSDATA_PREFIX'] = str(tessdata_dir)
-            print(f"DEBUG: Tesseract設定完了")
-            return True
-        else:
-            print(f"DEBUG: Tesseractが見つかりません")
-
-    print(f"DEBUG: システムのTesseractを使用")
-    return False
-```
-
-**方法2: Tesseractを直接実行してテスト**
-アプリバンドル内のTesseractが動作するか確認：
-
-```bash
-# ターミナルで実行
-cd build/macos/SummaryForDoc.app/Contents/Resources/tesseract
-./tesseract --version
-./tesseract --list-langs
-```
-
-**方法3: Fletのビルドパス構造を確認**
-Fletがどのようにファイルを配置するか調査：
-
-```bash
-# アプリバンドル内の構造を確認
-ls -la build/macos/SummaryForDoc.app/Contents/
-ls -la build/macos/SummaryForDoc.app/Contents/MacOS/
-ls -la build/macos/SummaryForDoc.app/Contents/Resources/
-```
-
-**方法4: 依存ライブラリの確認**
-Tesseractが必要とするライブラリを確認：
-
-```bash
-otool -L build/macos/SummaryForDoc.app/Contents/Resources/tesseract/tesseract
-```
-
-### 2. 代替アプローチの検討
-
-もし現在の方法でうまくいかない場合：
-
-#### オプションA: Tesseractのパスを修正
-- Fletのビルドシステムに合わせてパスを調整
-- sys._MEIPASS ではなく、別の方法でリソースパスを取得
-
-#### オプションB: 開発モードでのテスト
-- まず開発モード（python3 main.py）でOCRが動作することを確認
-- システムのTesseractを使用してテスト
-- その後、ビルド版の対応を行う
-
-#### オプションC: cloud-based OCRの使用
-- Google Cloud Vision API
-- AWS Textract
-- Azure Computer Vision
-などのクラウドサービスを使う（コストがかかる）
-
-### 3. 修正後の手順
-
-1. src/file_reader.py にデバッグログを追加
-2. macOS版を再ビルド
+3. **ビルドと再配置の手順確立**
    ```bash
    rm -rf build
    ~/Library/Python/3.9/bin/flet build macos
-   ```
-3. Tesseractファイルを再コピー
-   ```bash
    ./copy_tesseract.sh
    ```
-4. アプリを起動してログを確認
-5. 画像ファイルをドラッグ&ドロップしてテスト
-6. コンソール出力を確認（ターミナルから起動すると見える）
+
+4. **動作確認完了**
+   - JPEGファイルでOCRテスト成功
+   - テキスト抽出と要約が正常に動作
+
+## 次回の課題
+
+### 1. デバッグログのクリーンアップ（オプション）
+- src/file_reader.py の _setup_tesseract() にあるデバッグログを削除するか検討
+- 本番環境では不要だが、トラブルシューティング時には有用
+- 推奨: そのまま残しておく（問題発生時のデバッグに役立つ）
+
+### 2. アプリバンドルの配布準備
+- macOS版アプリの配布方法を検討
+- コード署名（Code Signing）の実施
+- 公証（Notarization）の実施（macOS Catalina以降）
+- DMGファイルの作成
+
+### 3. Windows版の開発
+macOS版が完成したので、Windows版をビルド：
+
+#### 必要な手順
+1. Windows PCでの環境構築
+   - Python 3.9以降をインストール
+   - Tesseract for Windows をインストール
+     - https://github.com/UB-Mannheim/tesseract/wiki
+   - 日本語学習データをダウンロード
+
+2. copy_tesseract_windows.bat スクリプトの作成
+   - macOS版の copy_tesseract.sh を参考に作成
+   - Windows向けのパス設定を実装
+   - DLLファイルのコピーと参照パス修正
+
+3. ビルドとテスト
+   ```cmd
+   rmdir /s /q build
+   flet build windows
+   copy_tesseract_windows.bat
+   ```
+
+### 4. 機能拡張の検討
+- OCR精度の向上
+  - 画像の前処理（ノイズ除去、コントラスト調整）
+  - Tesseractの設定パラメータの最適化
+- サポートする画像形式の追加（BMP, GIF, TIFF など）
+- バッチ処理の改善（複数画像の一括処理）
+- プログレスバーの追加（大きなファイルの処理時）
+
+### 5. ユーザードキュメントの作成
+- README.md の作成
+- 使用方法の説明
+- トラブルシューティングガイド
+- スクリーンショットの追加
 
 ## 参考情報
 
@@ -178,17 +126,27 @@ otool -L build/macos/SummaryForDoc.app/Contents/Resources/tesseract/tesseract
 - 学習データ: /opt/homebrew/share/tessdata/
 - アプリバンドル: build/macos/SummaryForDoc.app/Contents/Resources/tesseract/
 
-## Windows版について
+## 重要な知見とノウハウ
 
-macOS版が完成したら、Windows PCで以下の手順でビルド：
+### macOSアプリバンドルへの外部バイナリ統合
+1. **依存ライブラリの完全コピーが必須**
+   - otool -L でバイナリが必要とするライブラリをすべて確認
+   - システムライブラリ以外はすべてバンドルに含める
 
-1. Python 3.9以降をインストール
-2. Tesseract for Windows をインストール
-   - https://github.com/UB-Mannheim/tesseract/wiki
-3. プロジェクトをクローン
-4. requirements.txt から依存関係をインストール
-5. flet build windows を実行
-6. copy_tesseract_windows.bat を実行（要作成）
+2. **ライブラリ参照パスの変更が必須**
+   - install_name_tool を使って絶対パスを相対パスに変更
+   - @executable_path や @loader_path を活用
+   - バンドル内での相対パス構造を維持
+
+3. **Fletのビルド構造**
+   - 実行ファイル: Contents/MacOS/アプリ名
+   - リソース: Contents/Resources/
+   - Pythonコード: Contents/Resources/ 配下に配置される
+   - sys.executable でメイン実行ファイルのパスが取得可能
+
+4. **デバッグログの重要性**
+   - print() でのログ出力はターミナルから起動時のみ確認可能
+   - ビルド版のデバッグには欠かせない
 
 ## その他のメモ
 
@@ -203,6 +161,43 @@ macOS版が完成したら、Windows PCで以下の手順でビルド：
 ### 既知の制限
 - flet-dropzone は開発モード（python3 main.py）では動作しない
 - ビルド版でのみドラッグ&ドロップが機能する
+
+### 現在のアプリバンドル内容
+```
+build/macos/SummaryForDoc.app/
+├── Contents/
+│   ├── MacOS/
+│   │   └── SummaryForDoc (実行ファイル)
+│   └── Resources/
+│       ├── tesseract/
+│       │   ├── tesseract (バイナリ、86KB)
+│       │   ├── tessdata/
+│       │   │   ├── eng.traineddata (3.9MB)
+│       │   │   └── jpn.traineddata (2.4MB)
+│       │   └── lib/
+│       │       ├── libtesseract.5.dylib (2.7MB)
+│       │       ├── libleptonica.6.dylib (2.1MB)
+│       │       ├── libarchive.13.dylib (686KB)
+│       │       ├── libjpeg.8.dylib (475KB)
+│       │       ├── libpng16.16.dylib (203KB)
+│       │       ├── libtiff.6.dylib (527KB)
+│       │       ├── libwebp.7.dylib (344KB)
+│       │       ├── libgif.7.dylib (71KB)
+│       │       ├── libopenjp2.7.dylib (317KB)
+│       │       └── libzstd.1.dylib (634KB)
+│       └── (Pythonコードとその他のリソース)
+```
+
+## まとめ
+
+### macOS版 SummaryForDoc の完成
+- ✅ すべての主要機能が動作
+- ✅ テキスト、PDF、画像（OCR）のすべてに対応
+- ✅ ドラッグ&ドロップによる直感的な操作
+- ✅ 個人情報マスク機能
+- ✅ Claude APIによる高精度な要約
+
+次のステップは、Windows版の開発、アプリの配布準備、またはさらなる機能拡張です。
 
 ---
 次回セッションでは、上記の「次回の課題」セクションから作業を開始してください。

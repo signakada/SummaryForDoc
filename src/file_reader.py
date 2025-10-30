@@ -19,19 +19,36 @@ class FileReader:
     @staticmethod
     def _setup_tesseract():
         """Tesseractの実行ファイルとデータパスを設定"""
+        print(f"DEBUG: sys.frozen = {getattr(sys, 'frozen', False)}")
+        print(f"DEBUG: hasattr(sys, '_MEIPASS') = {hasattr(sys, '_MEIPASS')}")
+        print(f"DEBUG: sys.executable = {sys.executable}")
+
         # アプリバンドル内のTesseractパスを探す
         if getattr(sys, 'frozen', False):
             # PyInstallerやFletでビルドされた場合
             base_path = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
+            print(f"DEBUG: base_path = {base_path}")
+
             tesseract_cmd = base_path / 'tesseract' / 'tesseract'
             tessdata_dir = base_path / 'tesseract' / 'tessdata'
+
+            print(f"DEBUG: tesseract_cmd = {tesseract_cmd}")
+            print(f"DEBUG: tesseract_cmd.exists() = {tesseract_cmd.exists()}")
+            print(f"DEBUG: tessdata_dir = {tessdata_dir}")
+            print(f"DEBUG: tessdata_dir.exists() = {tessdata_dir.exists()}")
 
             if tesseract_cmd.exists():
                 pytesseract.pytesseract.tesseract_cmd = str(tesseract_cmd)
                 os.environ['TESSDATA_PREFIX'] = str(tessdata_dir)
+                print(f"DEBUG: Tesseract設定完了")
+                print(f"DEBUG: pytesseract.pytesseract.tesseract_cmd = {pytesseract.pytesseract.tesseract_cmd}")
+                print(f"DEBUG: TESSDATA_PREFIX = {os.environ.get('TESSDATA_PREFIX')}")
                 return True
+            else:
+                print(f"DEBUG: Tesseractが見つかりません")
 
         # システムのTesseractを使用（開発モード）
+        print(f"DEBUG: システムのTesseractを使用")
         return False
 
     @staticmethod
