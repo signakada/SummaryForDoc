@@ -931,23 +931,47 @@ class MedicalSummarizerApp:
             ),
         )
 
-        # タブを作成
-        tabs = ft.Tabs(
-            selected_index=0,
-            animation_duration=300,
-            tabs=[
-                ft.Tab(
-                    text="API設定",
-                    icon="key",
-                    content=self._create_api_settings_content()
-                ),
-                ft.Tab(
-                    text="カスタムプロンプト",
-                    icon="edit_note",
-                    content=self._create_custom_prompt_content()
-                ),
-            ],
+        # コンテンツコンテナ（切り替え可能）
+        content_container = ft.Container(
+            content=self._create_api_settings_content(),
+            expand=True,
         )
+
+        # タブ切り替えボタン
+        api_button = ft.ElevatedButton(
+            "⚙️ API設定",
+            style=ft.ButtonStyle(
+                color="white",
+                bgcolor="#1976d2",
+            ),
+        )
+
+        prompt_button = ft.ElevatedButton(
+            "📝 カスタムプロンプト",
+            style=ft.ButtonStyle(
+                color="#1976d2",
+                bgcolor="#e3f2fd",
+            ),
+        )
+
+        def switch_to_api(e):
+            api_button.style.bgcolor = "#1976d2"
+            api_button.style.color = "white"
+            prompt_button.style.bgcolor = "#e3f2fd"
+            prompt_button.style.color = "#1976d2"
+            content_container.content = self._create_api_settings_content()
+            self.page.update()
+
+        def switch_to_prompt(e):
+            api_button.style.bgcolor = "#e3f2fd"
+            api_button.style.color = "#1976d2"
+            prompt_button.style.bgcolor = "#1976d2"
+            prompt_button.style.color = "white"
+            content_container.content = self._create_custom_prompt_content()
+            self.page.update()
+
+        api_button.on_click = switch_to_api
+        prompt_button.on_click = switch_to_prompt
 
         # レイアウト
         self.page.add(
@@ -955,7 +979,9 @@ class MedicalSummarizerApp:
                 content=ft.Column([
                     ft.Row([title, back_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                     ft.Divider(),
-                    tabs,
+                    ft.Row([api_button, prompt_button], spacing=10),
+                    ft.Divider(),
+                    content_container,
                 ]),
                 padding=40,
             )
