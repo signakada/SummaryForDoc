@@ -8,10 +8,31 @@ from typing import Union, List, Tuple
 import PyPDF2
 from PIL import Image
 import pytesseract
+import os
+import sys
 
 
 class FileReader:
     """ファイル読み込みクラス"""
+
+    # Tesseractのパスを設定（アプリバンドル内を優先）
+    @staticmethod
+    def _setup_tesseract():
+        """Tesseractの実行ファイルとデータパスを設定"""
+        # アプリバンドル内のTesseractパスを探す
+        if getattr(sys, 'frozen', False):
+            # PyInstallerやFletでビルドされた場合
+            base_path = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
+            tesseract_cmd = base_path / 'tesseract' / 'tesseract'
+            tessdata_dir = base_path / 'tesseract' / 'tessdata'
+
+            if tesseract_cmd.exists():
+                pytesseract.pytesseract.tesseract_cmd = str(tesseract_cmd)
+                os.environ['TESSDATA_PREFIX'] = str(tessdata_dir)
+                return True
+
+        # システムのTesseractを使用（開発モード）
+        return False
 
     @staticmethod
     def read_text_file(file_path: Union[str, Path]) -> str:
@@ -101,6 +122,9 @@ class FileReader:
             FileNotFoundError: ファイルが見つからない
             Exception: OCRエラー
         """
+        # Tesseractのパスを設定
+        FileReader._setup_tesseract()
+
         file_path = Path(file_path)
 
         if not file_path.exists():
