@@ -31,6 +31,8 @@ class MedicalSummarizerApp:
         self.selected_files: List[Path] = []
         self.cleaned_text = ""
         self.summary_result = None
+        self.pii_log = []
+        self.confirmation_mode = True   # 確認モード（デフォルトON）
 
         # コンポーネント
         self.file_list = None
@@ -41,6 +43,14 @@ class MedicalSummarizerApp:
         self.process_button = None
         self.result_container = None
         self.status_text = None
+        self.masked_text_field = None  # 編集可能なテキストフィールド
+        self.confirm_button = None      # 確認完了ボタン
+        self.search_field = None        # 検索フィールド
+        self.search_results = []        # 検索結果のリスト
+        self.current_search_index = 0   # 現在の検索結果インデックス
+        self.search_result_text = None  # 検索結果表示テキスト
+        self.confirmation_toggle = None # 確認モードトグル
+        self.create_summary_button = None # 要約作成ボタン（確認モード用）
 
         # 初期化
         self._check_config()
@@ -190,8 +200,19 @@ class MedicalSummarizerApp:
             width=300
         )
 
+        # 確認モードトグル
+        self.confirmation_toggle = ft.Switch(
+            label="確認モード（個人情報削除を目視確認してから要約作成）",
+            value=True,
+            active_color="#1976d2",
+            on_change=self._on_toggle_confirmation_mode
+        )
+
         options_section = ft.Container(
             content=ft.Column([
+                ft.Text("⚙️ 動作モード:", size=16, weight=ft.FontWeight.BOLD),
+                self.confirmation_toggle,
+                ft.Divider(),
                 ft.Text("📝 出力する要約:", size=16, weight=ft.FontWeight.BOLD),
                 self.history_checkbox,
                 self.symptoms_checkbox,
@@ -204,10 +225,10 @@ class MedicalSummarizerApp:
             border_radius=10,
         )
 
-        # 実行ボタン
+        # 実行ボタン（初期状態は確認モードON）
         self.process_button = ft.ElevatedButton(
-            "個人情報を削除して要約作成",
-            icon="play_arrow",
+            "🔍 個人情報削除を確認",
+            icon="search",
             on_click=self._on_process,
             style=ft.ButtonStyle(
                 color="#ffffff",  # WHITE
@@ -265,6 +286,20 @@ class MedicalSummarizerApp:
                 ])
                 self.file_list.controls.append(file_row)
 
+    def _on_toggle_confirmation_mode(self, e):
+        """確認モードのトグルが変更されたときの処理"""
+        self.confirmation_mode = self.confirmation_toggle.value
+
+        # ボタンのラベルを更新
+        if self.confirmation_mode:
+            self.process_button.text = "🔍 個人情報削除を確認"
+            self.process_button.icon = "search"
+        else:
+            self.process_button.text = "個人情報を削除して要約作成"
+            self.process_button.icon = "play_arrow"
+
+        self.page.update()
+
     def _on_process(self, e):
         """要約作成ボタンが押されたときの処理"""
         self.process_button.disabled = True
@@ -285,8 +320,32 @@ class MedicalSummarizerApp:
             self.page.update()
 
             remover = PIIRemover()
-            self.cleaned_text, pii_log = remover.clean_text(all_text)
+            self.cleaned_text, self.pii_log = remover.clean_text(all_text)
 
+            # 確認モードの分岐
+            if self.confirmation_mode:
+                # 確認モードON：確認画面を表示
+                self.status_text.value = "✅ 個人情報の削除が完了しました（確認してください）"
+                self.status_text.color = "#1976d2"  # BLUE_700
+                self.page.update()
+
+                # マスクされたテキストと削除サマリーを表示
+                self._show_masked_text_with_summary(self.cleaned_text, remover.get_summary_report())
+            else:
+                # 確認モードOFF：自動で要約生成
+                self._execute_summary_generation()
+
+        except Exception as ex:
+            self.status_text.value = f"❌ エラー: {str(ex)}"
+            self.status_text.color = "#d32f2f"  # RED_700
+
+        finally:
+            self.process_button.disabled = False
+            self.page.update()
+
+    def _execute_summary_generation(self):
+        """要約生成を実行（確認モードOFFまたは確認完了後）"""
+        try:
             # 3. 要約生成
             self.status_text.value = "🤖 AI要約を生成中..."
             self.page.update()
@@ -311,14 +370,248 @@ class MedicalSummarizerApp:
 
             self.status_text.value = f"✅ 完了しました！ ({len(saved_files)}件のファイルを保存)"
             self.status_text.color = "#388e3c"  # GREEN_700
+            self.page.update()
 
         except Exception as ex:
             self.status_text.value = f"❌ エラー: {str(ex)}"
             self.status_text.color = "#d32f2f"  # RED_700
-
-        finally:
-            self.process_button.disabled = False
             self.page.update()
+
+    def _show_masked_text_with_summary(self, masked_text: str, summary_report: str):
+        """マスクされたテキストと削除サマリーを表示（デバッグ用）"""
+        self.result_container.controls.clear()
+
+        # 削除サマリー
+        self.result_container.controls.append(
+            self._create_result_card(
+                "🔒 個人情報削除サマリー",
+                summary_report,
+                "#fff3e0"  # ORANGE_50
+            )
+        )
+
+        # 説明テキスト
+        instruction_text = ft.Text(
+            "⚠️ 下記のテキストを確認し、必要に応じて手動で個人情報を削除してください。\n"
+            "検索機能を使って特定の文字列を探すことができます。\n"
+            "確認が完了したら「確認完了して要約作成」ボタンを押してください。",
+            size=14,
+            color="#d32f2f",  # RED_700
+            weight=ft.FontWeight.BOLD
+        )
+
+        # 検索フィールド
+        self.search_field = ft.TextField(
+            label="検索ワード（氏名、住所など）",
+            width=300,
+            border_color="#1976d2",
+        )
+
+        # 検索結果表示テキスト
+        self.search_result_text = ft.Text("", size=12, color="#616161")
+
+        # 検索ボタン
+        search_button = ft.ElevatedButton(
+            "🔍 検索",
+            on_click=self._on_search,
+            style=ft.ButtonStyle(
+                bgcolor="#1976d2",
+                color="#ffffff",
+            ),
+        )
+
+        # 前へボタン
+        prev_button = ft.IconButton(
+            icon="arrow_back",
+            tooltip="前の結果",
+            on_click=self._on_prev_search,
+        )
+
+        # 次へボタン
+        next_button = ft.IconButton(
+            icon="arrow_forward",
+            tooltip="次の結果",
+            on_click=self._on_next_search,
+        )
+
+        # 削除ボタン
+        delete_button = ft.ElevatedButton(
+            "❌ この箇所を削除",
+            on_click=self._on_delete_current_match,
+            style=ft.ButtonStyle(
+                bgcolor="#d32f2f",
+                color="#ffffff",
+            ),
+        )
+
+        # 検索バー
+        search_bar = ft.Row([
+            self.search_field,
+            search_button,
+            prev_button,
+            next_button,
+            delete_button,
+            self.search_result_text,
+        ], spacing=10)
+
+        # 編集可能なマスク済みテキストフィールド
+        self.masked_text_field = ft.TextField(
+            value=masked_text,
+            multiline=True,
+            min_lines=10,
+            max_lines=20,
+            border_color="#1976d2",  # BLUE_700
+            bgcolor="#ffffff",
+        )
+
+        # 確認完了して要約作成ボタン
+        self.create_summary_button = ft.ElevatedButton(
+            "✅ 確認完了して要約作成",
+            icon="check_circle",
+            on_click=self._on_create_summary_after_confirmation,
+            style=ft.ButtonStyle(
+                color="#ffffff",
+                bgcolor="#388e3c",  # GREEN_700
+            ),
+            height=50,
+        )
+
+        # コンテナに追加
+        masked_text_container = ft.Container(
+            content=ft.Column([
+                ft.Text("📝 マスク済み文字起こし（編集可能）", size=18, weight=ft.FontWeight.BOLD),
+                ft.Divider(),
+                instruction_text,
+                search_bar,
+                ft.Divider(),
+                self.masked_text_field,
+                self.create_summary_button,
+            ]),
+            padding=15,
+            bgcolor="#e3f2fd",  # BLUE_50
+            border_radius=10,
+        )
+
+        self.result_container.controls.append(masked_text_container)
+        self.page.update()
+
+    def _on_search(self, e):
+        """検索ボタンが押されたときの処理"""
+        search_word = self.search_field.value
+        if not search_word:
+            self.search_result_text.value = "検索ワードを入力してください"
+            self.search_result_text.color = "#d32f2f"
+            self.page.update()
+            return
+
+        # テキスト内を検索
+        text = self.masked_text_field.value
+        self.search_results = []
+
+        # すべてのマッチ箇所を見つける
+        start = 0
+        while True:
+            pos = text.find(search_word, start)
+            if pos == -1:
+                break
+            self.search_results.append(pos)
+            start = pos + 1
+
+        if not self.search_results:
+            self.search_result_text.value = f"「{search_word}」は見つかりませんでした"
+            self.search_result_text.color = "#616161"
+            self.page.update()
+            return
+
+        # 最初の結果を表示
+        self.current_search_index = 0
+        self._show_search_result()
+
+    def _on_prev_search(self, e):
+        """前の検索結果に移動"""
+        if not self.search_results:
+            return
+
+        self.current_search_index = (self.current_search_index - 1) % len(self.search_results)
+        self._show_search_result()
+
+    def _on_next_search(self, e):
+        """次の検索結果に移動"""
+        if not self.search_results:
+            return
+
+        self.current_search_index = (self.current_search_index + 1) % len(self.search_results)
+        self._show_search_result()
+
+    def _show_search_result(self):
+        """現在の検索結果を表示"""
+        if not self.search_results:
+            return
+
+        text = self.masked_text_field.value
+        pos = self.search_results[self.current_search_index]
+        search_word = self.search_field.value
+
+        # 周辺テキストを取得（前後50文字）
+        start = max(0, pos - 50)
+        end = min(len(text), pos + len(search_word) + 50)
+        context = text[start:end]
+
+        # 検索結果情報を表示
+        self.search_result_text.value = (
+            f"🔍 {self.current_search_index + 1}/{len(self.search_results)}件目\n"
+            f"位置: {pos}文字目\n"
+            f"周辺: ...{context}..."
+        )
+        self.search_result_text.color = "#1976d2"
+        self.page.update()
+
+    def _on_delete_current_match(self, e):
+        """現在の検索結果を削除"""
+        if not self.search_results:
+            self.search_result_text.value = "検索結果がありません"
+            self.search_result_text.color = "#d32f2f"
+            self.page.update()
+            return
+
+        text = self.masked_text_field.value
+        pos = self.search_results[self.current_search_index]
+        search_word = self.search_field.value
+
+        # マッチ箇所を削除（空文字に置換）
+        new_text = text[:pos] + text[pos + len(search_word):]
+        self.masked_text_field.value = new_text
+
+        # 検索結果リストを更新（削除後の位置を再計算）
+        self.search_results.pop(self.current_search_index)
+
+        # 後続の検索結果の位置を調整
+        for i in range(self.current_search_index, len(self.search_results)):
+            self.search_results[i] -= len(search_word)
+
+        if self.search_results:
+            # 次の結果を表示（範囲外なら最後の結果）
+            if self.current_search_index >= len(self.search_results):
+                self.current_search_index = len(self.search_results) - 1
+            self._show_search_result()
+            self.search_result_text.value += "\n✅ 削除しました"
+        else:
+            self.search_result_text.value = f"✅「{search_word}」はすべて削除されました"
+            self.search_result_text.color = "#388e3c"
+
+        self.page.update()
+
+    def _on_create_summary_after_confirmation(self, e):
+        """確認完了して要約作成ボタンが押されたときの処理"""
+        # ユーザーが編集したテキストを取得
+        self.cleaned_text = self.masked_text_field.value
+
+        # 確認画面を非表示にする
+        self.result_container.controls.clear()
+        self.page.update()
+
+        # 要約生成を実行
+        self._execute_summary_generation()
 
     def _show_results(self):
         """結果を表示"""

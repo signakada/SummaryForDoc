@@ -57,7 +57,20 @@ class PIIRemover:
         pattern2 = r'[ァ-ヴー]{2,10}'
 
         # パターン3: 「患者氏名：〇〇」「氏名：〇〇」などの明示的な記載
-        pattern3 = r'(?:患者)?氏名[：:\s]*([一-龯ァ-ヴー\s]{2,10})'
+        # スペースを含む姓名に対応（例：山本　百花、田中 太郎）
+        pattern3 = r'(?:患者)?氏名[：:\s]*([一-龯ァ-ヴー]{1,5}[\s　]+[一-龯ァ-ヴー]{1,5}|[一-龯ァ-ヴー]{2,10})(?=\s|$|\n|/)'
+
+        # パターン4: ファイル名などで患者番号の後にアンダースコアで区切られた氏名
+        # 例: _山本　百花_ のようなパターン（患者番号は既に削除されている想定）
+        pattern4 = r'_([一-龯ァ-ヴー]{1,5}[\s　]+[一-龯ァ-ヴー]{1,5}|[一-龯ァ-ヴー]{2,10})_'
+
+        # パターン5: [患者番号]や[ID]の直後にある氏名
+        # 例: [患者番号]山本　百花_ のようなパターン
+        pattern5 = r'\[(?:患者番号|ID)\]([一-龯ァ-ヴー]{1,5}[\s　]+[一-龯ァ-ヴー]{1,5}|[一-龯ァ-ヴー]{2,10})_'
+
+        # パターン6: 数字の直後にある氏名（スペース付き姓名のみ、誤検知防止）
+        # 例: ６２２山本　太郎 のようなパターン
+        pattern6 = r'\d+([一-龯]{1,5}[\s　]+[一-龯]{1,5})(?=\s|$|\n)'
 
         # 医療用語をチェック
         def is_medical_term(match_text: str) -> bool:
@@ -69,12 +82,45 @@ class PIIRemover:
         # パターン3（明示的な氏名記載）を優先して置換
         def replace_explicit_name(match):
             name = match.group(1).strip()
-            if not is_medical_term(name):
+            if not is_medical_term(name) and len(name.replace(' ', '').replace('　', '')) >= 2:
                 self.replacement_log.append(('氏名', name))
                 return match.group(0).replace(name, '[氏名]')
             return match.group(0)
 
         protected_text = re.sub(pattern3, replace_explicit_name, protected_text)
+
+        # パターン4（ファイル名のアンダースコア区切り氏名）を置換
+        def replace_filename_name(match):
+            name = match.group(1).strip()
+            if not is_medical_term(name) and len(name.replace(' ', '').replace('　', '')) >= 2:
+                self.replacement_log.append(('氏名', name))
+                return '_[氏名]_'
+            return match.group(0)
+
+        protected_text = re.sub(pattern4, replace_filename_name, protected_text)
+
+        # パターン5（[患者番号]の直後の氏名）を置換
+        def replace_after_id_name(match):
+            name = match.group(1).strip()
+            if not is_medical_term(name) and len(name.replace(' ', '').replace('　', '')) >= 2:
+                self.replacement_log.append(('氏名', name))
+                # [患者番号]や[ID]の部分を保持して、氏名だけ[氏名]に置換
+                return match.group(0).replace(name, '[氏名]')
+            return match.group(0)
+
+        protected_text = re.sub(pattern5, replace_after_id_name, protected_text)
+
+        # パターン6（数字の直後の氏名）を置換
+        def replace_after_number_name(match):
+            name = match.group(1).strip()
+            # スペースを含む姓名のみ（誤検知防止）
+            if not is_medical_term(name) and len(name.replace(' ', '').replace('　', '')) >= 2:
+                self.replacement_log.append(('氏名', name))
+                # 数字の部分は保持して、氏名だけ[氏名]に置換
+                return match.group(0).replace(name, '[氏名]')
+            return match.group(0)
+
+        protected_text = re.sub(pattern6, replace_after_number_name, protected_text)
 
         # パターン1（漢字の姓名）を置換
         def replace_kanji_name(match):
@@ -92,6 +138,7 @@ class PIIRemover:
     def remove_birthdates(self, text: str) -> str:
         """
         生年月日を削除
+        病歴の日付（月日のみ、年のみ）は保護します
 
         Args:
             text: 元のテキスト
@@ -99,23 +146,41 @@ class PIIRemover:
         Returns:
             str: 生年月日を削除したテキスト
         """
-        patterns = [
-            # 1985年3月9日、1985/3/9、1985-3-9
-            (r'\d{4}[年/\-]\d{1,2}[月/\-]\d{1,2}日?', '生年月日'),
-            # 昭和60年3月9日、S60.3.9、S60/3/9
-            (r'[明大昭平令和]{1,2}\d{1,3}[年\.]\d{1,2}[月\.]\d{1,2}日?', '生年月日'),
-            (r'[MTSHR]\d{1,3}[\.\/]\d{1,2}[\.\/]\d{1,2}', '生年月日'),
-            # 生年月日：の後ろ
-            (r'生年月日[：:\s]*[\d年月日明大昭平令和MTSHR\.\/\-]{6,}', '生年月日'),
-        ]
-
         result = text
-        for pattern, label in patterns:
-            def replace_with_log(match):
-                self.replacement_log.append((label, match.group(0)))
-                return '[生年月日]'
 
-            result = re.sub(pattern, replace_with_log, result)
+        # パターン1: 「生年月日：」の後ろ（最優先）
+        def replace_explicit_birthdate(match):
+            self.replacement_log.append(('生年月日', match.group(0)))
+            return '生年月日：[生年月日]'
+        result = re.sub(r'生年月日[：:\s]*([\d年月日明大昭平令和MTSHR\.\/\-\(\)]{6,})', replace_explicit_birthdate, result)
+
+        # パターン2: 西暦+和暦の複合形式（生年月日の可能性が極めて高い）
+        # 2003(H15)/10/19、1985(S60)/3/9
+        def replace_complex_date(match):
+            self.replacement_log.append(('生年月日', match.group(0)))
+            return '[生年月日]'
+        result = re.sub(r'\d{4}\([MTSHR]\d{1,3}\)[/\-\.]\d{1,2}[/\-\.]\d{1,2}', replace_complex_date, result)
+
+        # パターン3: 西暦4桁+月+日の完全な日付（生年月日の可能性が高い）
+        # ただし、病歴の記述（平成○年、令和○年など）を誤検知しないように年月日が揃っているもののみ
+        # 1985年3月9日、1985/3/9、1985-3-9
+        def replace_full_date(match):
+            matched = match.group(0)
+            # 1900年代〜2020年代の範囲に限定（生年月日として妥当な範囲）
+            year_match = re.match(r'(19\d{2}|20[0-2]\d)', matched)
+            if year_match:
+                self.replacement_log.append(('生年月日', matched))
+                return '[生年月日]'
+            return matched
+        result = re.sub(r'\d{4}[年/\-\.]\d{1,2}[月/\-\.]\d{1,2}日?', replace_full_date, result)
+
+        # パターン4: 和暦の完全な日付（年月日がすべて揃っているもの）
+        # 昭和60年3月9日、S60.3.9、S60/3/9
+        def replace_japanese_era_date(match):
+            self.replacement_log.append(('生年月日', match.group(0)))
+            return '[生年月日]'
+        result = re.sub(r'[明大昭平令和]{1,2}\d{1,3}[年\.]\d{1,2}[月\.]\d{1,2}日?', replace_japanese_era_date, result)
+        result = re.sub(r'[MTSHR]\d{1,3}[\.\/]\d{1,2}[\.\/]\d{1,2}', replace_japanese_era_date, result)
 
         return result
 
@@ -129,22 +194,33 @@ class PIIRemover:
         Returns:
             str: 住所を削除したテキスト
         """
-        patterns = [
-            # 〒123-4567
-            (r'〒?\d{3}-?\d{4}', '郵便番号'),
-            # 東京都渋谷区〇〇1-2-3
-            (r'[都道府県]{1}[一-龯ぁ-んァ-ヴー]+[市区町村郡]{1}[一-龯ぁ-んァ-ヴー0-9\-ー]+', '住所'),
-            # 住所：の後ろ
-            (r'住所[：:\s]*[^\n]{5,50}', '住所'),
-        ]
-
         result = text
-        for pattern, label in patterns:
-            def replace_with_log(match):
-                self.replacement_log.append((label, match.group(0)))
-                return f'[{label}]'
 
-            result = re.sub(pattern, replace_with_log, result)
+        # パターン1: 〒123-4567（郵便番号）
+        def replace_postal_code(match):
+            self.replacement_log.append(('郵便番号', match.group(0)))
+            return '[郵便番号]'
+        result = re.sub(r'〒?\d{3}-?\d{4}', replace_postal_code, result)
+
+        # パターン2: 住所：〇〇（明示的な住所表記を先に処理）
+        def replace_explicit_address(match):
+            full_match = match.group(0)
+            # すでに[住所]が含まれていないかチェック
+            if '[住所]' not in full_match and '[郵便番号]' not in full_match:
+                self.replacement_log.append(('住所', full_match))
+                return '住所：[住所]'
+            return full_match
+        result = re.sub(r'住所[：:\s]*[^\n]+', replace_explicit_address, result)
+
+        # パターン3: 東京都渋谷区〇〇1-2-3（都道府県で始まる住所パターン）
+        def replace_prefecture_address(match):
+            matched = match.group(0)
+            # すでにマスク済みでないかチェック
+            if '[住所]' not in matched and '[郵便番号]' not in matched:
+                self.replacement_log.append(('住所', matched))
+                return '[住所]'
+            return matched
+        result = re.sub(r'[東京大阪京都北海道青森岩手宮城秋田山形福島茨城栃木群馬埼玉千葉神奈川新潟富山石川福井山梨長野岐阜静岡愛知三重滋賀兵庫奈良和歌山鳥取島根岡山広島山口徳島香川愛媛高知福岡佐賀長崎熊本大分宮崎鹿児島沖縄][都道府県]{0,1}[一-龯ぁ-んァ-ヴー]+[市区町村郡]{1}[一-龯ぁ-んァ-ヴー0-9\-ー]+', replace_prefecture_address, result)
 
         return result
 
@@ -158,28 +234,40 @@ class PIIRemover:
         Returns:
             str: 電話番号を削除したテキスト
         """
-        patterns = [
-            # 03-1234-5678、090-1234-5678
-            r'\d{2,4}-\d{2,4}-\d{4}',
-            # 0312345678、09012345678
-            r'\d{10,11}',
-            # (03) 1234-5678
-            r'\(\d{2,4}\)\s*\d{2,4}-\d{4}',
-        ]
-
+        # 順番に処理（より具体的なパターンから）
         result = text
-        for pattern in patterns:
-            def replace_with_log(match):
-                # 日付（2023-04-15など）と誤認しないようにチェック
-                matched = match.group(0)
-                # ハイフンで区切られていて、最初が1-2桁なら日付の可能性
-                if re.match(r'\d{1,2}-\d{1,2}-\d{1,2}', matched):
-                    return matched  # 日付なので置換しない
 
-                self.replacement_log.append(('電話番号', matched))
-                return '[電話番号]'
+        # パターン1: (03) 1234-5678 形式
+        def replace_with_parens(match):
+            self.replacement_log.append(('電話番号', match.group(0)))
+            return '[電話番号]'
+        result = re.sub(r'\(\d{2,4}\)\s*\d{2,4}-\d{4}', replace_with_parens, result)
 
-            result = re.sub(pattern, replace_with_log, result)
+        # パターン2: 03-1234-5678、090-1234-5678 形式
+        def replace_with_hyphens(match):
+            matched = match.group(0)
+            # 年月日（2023-04-15など）と誤認しないようにチェック
+            if re.match(r'\d{4}-\d{1,2}-\d{1,2}', matched):
+                return matched  # 日付なので置換しない
+            # 郵便番号(123-4567)との区別
+            if re.match(r'\d{3}-\d{4}', matched):
+                return matched  # 郵便番号パターンなので置換しない
+
+            self.replacement_log.append(('電話番号', matched))
+            return '[電話番号]'
+        result = re.sub(r'\d{2,4}-\d{3,4}-\d{4}', replace_with_hyphens, result)
+
+        # パターン3: 0312345678、09012345678 形式（ハイフンなし）
+        # より厳格に：先頭が0で始まる10-11桁の数字のみ
+        def replace_no_hyphens(match):
+            matched = match.group(0)
+            # 年（2023など）と誤認しないよう、先頭が0であることを確認
+            if not matched.startswith('0'):
+                return matched
+
+            self.replacement_log.append(('電話番号', matched))
+            return '[電話番号]'
+        result = re.sub(r'\b0\d{9,10}\b', replace_no_hyphens, result)
 
         return result
 
@@ -194,8 +282,14 @@ class PIIRemover:
             str: ID情報を削除したテキスト
         """
         patterns = [
-            (r'(?:診察券|患者ID|カルテ番号)[：:\s]*[\w\-]+', 'ID'),
+            # 明示的なID表記
+            (r'(?:診察券|患者ID|患者番号|カルテ番号)[：:\s]*[\w\-]+', 'ID'),
             (r'ID[：:\s]*[\w\-]+', 'ID'),
+            # 患者番号: 240065 のような形式
+            (r'患者番号[：:\s]*\d{4,8}', 'ID'),
+            # ファイル名などの患者番号（6桁前後の数字 + アンダースコア）
+            # 例: 240065_ のようなパターン（単語境界で囲まれている場合）
+            (r'\b\d{4,8}_', '患者番号'),
         ]
 
         result = text
@@ -223,12 +317,12 @@ class PIIRemover:
 
         result = text
 
-        # 順番に削除処理を実行
-        result = self.remove_birthdates(result)
-        result = self.remove_addresses(result)
-        result = self.remove_phone_numbers(result)
-        result = self.remove_medical_ids(result)
-        result = self.remove_names(result)  # 氏名は最後（他の削除で文脈が減る）
+        # 順番に削除処理を実行（誤検知を防ぐため、より具体的なパターンから）
+        result = self.remove_birthdates(result)    # 生年月日
+        result = self.remove_phone_numbers(result) # 電話番号 - 郵便番号より先に
+        result = self.remove_addresses(result)     # 住所（郵便番号含む）
+        result = self.remove_medical_ids(result)   # ID情報
+        result = self.remove_names(result)         # 氏名は最後
 
         return result, self.replacement_log
 

@@ -171,6 +171,7 @@ class FileReader:
     def read_multiple_files(cls, file_paths: List[Union[str, Path]]) -> str:
         """
         複数のファイルを読み込んで結合
+        ファイル名も個人情報マスク処理の対象になります
 
         Args:
             file_paths: ファイルパスのリスト
@@ -181,23 +182,33 @@ class FileReader:
         Raises:
             Exception: 読み込みエラー
         """
+        # PIIRemoverをインポート（循環参照を避けるため関数内でインポート）
+        from src.pii_remover import PIIRemover
+
         all_content = []
         errors = []
+        remover = PIIRemover()
 
         for file_path in file_paths:
             try:
                 content, file_type = cls.read_file(file_path)
                 file_name = Path(file_path).name
 
+                # ファイル名からも個人情報を削除
+                masked_file_name, _ = remover.clean_text(file_name)
+
                 all_content.append(
                     f"{'='*60}\n"
-                    f"ファイル: {file_name} (種別: {file_type})\n"
+                    f"ファイル: {masked_file_name} (種別: {file_type})\n"
                     f"{'='*60}\n"
                     f"{content}\n"
                 )
 
             except Exception as e:
-                errors.append(f"❌ {Path(file_path).name}: {str(e)}")
+                # エラーメッセージのファイル名もマスク
+                original_name = Path(file_path).name
+                masked_name, _ = remover.clean_text(original_name)
+                errors.append(f"❌ {masked_name}: {str(e)}")
 
         if errors:
             error_msg = "\n".join(errors)
