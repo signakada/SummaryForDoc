@@ -152,20 +152,40 @@ class MedicalSummarizerApp:
                     ft.SnackBar(content=ft.Text(f"ファイル選択エラー: {str(ex)}"))
                 )
 
-        pick_button = ft.ElevatedButton(
-            "ファイルを選択 (txt, pdf, jpg, png)",
-            icon="upload_file",
-            on_click=open_file_picker
-        )
-
         # ファイルリスト表示
         self.file_list = ft.Column(spacing=5)
+
+        # ファイル選択エリア（視覚的にわかりやすく）
+        file_select_area = ft.Container(
+            content=ft.Column([
+                ft.Icon("cloud_upload", size=48, color="#1976d2"),
+                ft.Text("ファイルを選択してください", size=16, weight=ft.FontWeight.BOLD, color="#1976d2"),
+                ft.Text("txt, pdf, jpg, png に対応", size=12, color="#616161"),
+                ft.ElevatedButton(
+                    "📁 ファイルを選択",
+                    icon="upload_file",
+                    on_click=open_file_picker,
+                    style=ft.ButtonStyle(
+                        bgcolor="#1976d2",
+                        color="#ffffff",
+                    ),
+                ),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10),
+            width=None,
+            height=180,
+            alignment=ft.alignment.center,
+            bgcolor="#e3f2fd",  # BLUE_50
+            border=ft.border.all(2, "#90caf9"),  # BLUE_200
+            border_radius=10,
+        )
 
         file_section = ft.Container(
             content=ft.Column([
                 ft.Text("📄 読み込んだファイル:", size=16, weight=ft.FontWeight.BOLD),
                 self.file_list,
-                pick_button
+                file_select_area,
             ]),
             padding=15,
             border=ft.border.all(1, "#90caf9"),  # BLUE_200
