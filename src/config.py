@@ -6,23 +6,42 @@ APIキーや設定値を管理します
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from src.config_manager import ConfigManager
 
-# .envファイルを読み込み
+# .envファイルを読み込み（後方互換性のため）
 load_dotenv()
+
+# 設定マネージャーを初期化
+_config_manager = ConfigManager()
 
 
 class Config:
     """アプリケーション設定クラス"""
 
+    # ConfigManagerから設定を読み込み、なければ環境変数から読み込み（後方互換性）
+    _user_config = _config_manager.load_config()
+
     # APIキー
-    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    ANTHROPIC_API_KEY = (
+        _user_config.get("anthropic_api_key") if _user_config
+        else os.getenv("ANTHROPIC_API_KEY")
+    )
+    OPENAI_API_KEY = (
+        _user_config.get("openai_api_key") if _user_config
+        else os.getenv("OPENAI_API_KEY")
+    )
 
     # 使用するAIプロバイダー（anthropic または openai）
-    AI_PROVIDER = os.getenv("AI_PROVIDER", "anthropic")
+    AI_PROVIDER = (
+        _user_config.get("ai_provider") if _user_config
+        else os.getenv("AI_PROVIDER", "anthropic")
+    )
 
     # 使用するモデル
-    AI_MODEL = os.getenv("AI_MODEL", "claude-3-5-haiku-20241022")
+    AI_MODEL = (
+        _user_config.get("ai_model") if _user_config
+        else os.getenv("AI_MODEL", "claude-3-5-haiku-20241022")
+    )
 
     # ディレクトリ設定
     BASE_DIR = Path(__file__).parent.parent
@@ -69,6 +88,33 @@ class Config:
         return None
 
     @classmethod
+    def reload_config(cls):
+        """設定を再読み込み"""
+        cls._user_config = _config_manager.load_config()
+
+        # APIキー
+        cls.ANTHROPIC_API_KEY = (
+            cls._user_config.get("anthropic_api_key") if cls._user_config
+            else os.getenv("ANTHROPIC_API_KEY")
+        )
+        cls.OPENAI_API_KEY = (
+            cls._user_config.get("openai_api_key") if cls._user_config
+            else os.getenv("OPENAI_API_KEY")
+        )
+
+        # AIプロバイダー
+        cls.AI_PROVIDER = (
+            cls._user_config.get("ai_provider") if cls._user_config
+            else os.getenv("AI_PROVIDER", "anthropic")
+        )
+
+        # AIモデル
+        cls.AI_MODEL = (
+            cls._user_config.get("ai_model") if cls._user_config
+            else os.getenv("AI_MODEL", "claude-3-5-haiku-20241022")
+        )
+
+    @classmethod
     def validate_config(cls):
         """設定の検証"""
         errors = []
@@ -76,7 +122,6 @@ class Config:
         if not cls.is_api_key_configured():
             errors.append(
                 f"APIキーが設定されていません。"
-                f".envファイルに{cls.AI_PROVIDER.upper()}_API_KEYを設定してください。"
             )
 
         if cls.AI_PROVIDER not in ["anthropic", "openai"]:
@@ -86,6 +131,11 @@ class Config:
             )
 
         return errors
+
+    @classmethod
+    def get_config_manager(cls):
+        """ConfigManagerインスタンスを取得"""
+        return _config_manager
 
 
 # 設定インスタンス

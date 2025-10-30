@@ -40,6 +40,8 @@ class MedicalSummarizerApp:
         self.summary_result = None
         self.pii_log = []
         self.confirmation_mode = True   # 確認モード（デフォルトON）
+        self.main_view = None           # メインビュー
+        self.settings_view = None       # 設定ビュー
 
         # コンポーネント
         self.file_list = None
@@ -60,37 +62,40 @@ class MedicalSummarizerApp:
         self.create_summary_button = None # 要約作成ボタン（確認モード用）
 
         # 初期化
-        self._check_config()
-        self._build_ui()
+        if not self._check_config():
+            # APIキーが未設定の場合は設定画面を表示
+            self._show_initial_setup()
+        else:
+            self._build_ui()
 
     def _check_config(self):
-        """設定をチェック"""
-        errors = config.validate_config()
-        if errors:
-            # エラーダイアログを表示
-            def close_dialog(e):
-                self.page.window.destroy()
+        """
+        設定をチェック
 
-            dialog = ft.AlertDialog(
-                title=ft.Text("設定エラー"),
-                content=ft.Text("\n".join(errors) + "\n\n.envファイルを確認してください。"),
-                actions=[
-                    ft.TextButton("閉じる", on_click=close_dialog)
-                ]
-            )
-            self.page.overlay.append(dialog)
-            dialog.open = True
+        Returns:
+            bool: 設定が正常な場合True
+        """
+        errors = config.validate_config()
+        return len(errors) == 0
 
     def _build_ui(self):
         """UIを構築"""
 
-        # タイトル
-        title = ft.Text(
-            "医療文書要約ツール",
-            size=28,
-            weight=ft.FontWeight.BOLD,
-            color="#1976d2"  # BLUE_700
-        )
+        # タイトルと設定ボタン
+        title_row = ft.Row([
+            ft.Text(
+                "医療文書要約ツール",
+                size=28,
+                weight=ft.FontWeight.BOLD,
+                color="#1976d2"  # BLUE_700
+            ),
+            ft.IconButton(
+                icon="settings",
+                tooltip="設定",
+                icon_color="#1976d2",
+                on_click=self._show_settings_screen
+            )
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
         # ファイル選択エリア
         def open_file_picker(e):
@@ -296,7 +301,7 @@ class MedicalSummarizerApp:
 
         # メインレイアウト
         self.page.add(
-            title,
+            title_row,
             ft.Divider(),
             file_section,
             options_section,
@@ -745,6 +750,322 @@ class MedicalSummarizerApp:
             padding=15,
             bgcolor=bg_color,
             border_radius=10,
+        )
+
+    def _show_initial_setup(self):
+        """初回起動時の設定画面を表示"""
+        self.page.clean()
+
+        # タイトル
+        title = ft.Text(
+            "医療文書要約ツール - 初期設定",
+            size=28,
+            weight=ft.FontWeight.BOLD,
+            color="#1976d2"
+        )
+
+        # 説明文
+        description = ft.Text(
+            "このアプリを使用するには、AIプロバイダーのAPIキーが必要です。\n"
+            "Anthropic: https://console.anthropic.com/\n"
+            "OpenAI: https://platform.openai.com/api-keys",
+            size=14,
+            color="#616161"
+        )
+
+        # プロバイダー選択
+        provider_dropdown = ft.Dropdown(
+            label="AIプロバイダー",
+            options=[
+                ft.dropdown.Option("anthropic", "Anthropic (Claude)"),
+                ft.dropdown.Option("openai", "OpenAI (GPT)"),
+            ],
+            value="anthropic",
+            width=500,
+        )
+
+        # Anthropic APIキー入力フィールド
+        anthropic_key_field = ft.TextField(
+            label="Anthropic APIキー",
+            hint_text="sk-ant-...",
+            password=True,
+            can_reveal_password=True,
+            width=500,
+            border_color="#1976d2",
+        )
+
+        # OpenAI APIキー入力フィールド
+        openai_key_field = ft.TextField(
+            label="OpenAI APIキー",
+            hint_text="sk-...",
+            password=True,
+            can_reveal_password=True,
+            width=500,
+            border_color="#1976d2",
+            visible=False,
+        )
+
+        # プロバイダー変更時の処理
+        def on_provider_change(e):
+            if provider_dropdown.value == "anthropic":
+                anthropic_key_field.visible = True
+                openai_key_field.visible = False
+            else:
+                anthropic_key_field.visible = False
+                openai_key_field.visible = True
+            self.page.update()
+
+        provider_dropdown.on_change = on_provider_change
+
+        # 保存ボタン
+        def save_and_continue(e):
+            provider = provider_dropdown.value
+            anthropic_key = anthropic_key_field.value
+            openai_key = openai_key_field.value
+
+            # 選択されたプロバイダーのAPIキーを確認
+            if provider == "anthropic" and (not anthropic_key or not anthropic_key.strip()):
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("Anthropic APIキーを入力してください"))
+                )
+                return
+            elif provider == "openai" and (not openai_key or not openai_key.strip()):
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("OpenAI APIキーを入力してください"))
+                )
+                return
+
+            # 設定を保存
+            config_manager = config.get_config_manager()
+            if config_manager.save_api_settings(
+                anthropic_api_key=anthropic_key.strip() if anthropic_key else None,
+                openai_api_key=openai_key.strip() if openai_key else None,
+                ai_provider=provider
+            ):
+                # 設定を再読み込み
+                config.reload_config()
+
+                # メイン画面を表示
+                self.page.clean()
+                self._build_ui()
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("設定を保存しました"))
+                )
+            else:
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("設定の保存に失敗しました"))
+                )
+
+        save_button = ft.ElevatedButton(
+            "保存して開始",
+            icon="check",
+            on_click=save_and_continue,
+            style=ft.ButtonStyle(
+                color="#ffffff",
+                bgcolor="#1976d2",
+            ),
+            height=50,
+        )
+
+        # レイアウト
+        self.page.add(
+            ft.Container(
+                content=ft.Column([
+                    title,
+                    ft.Divider(),
+                    description,
+                    ft.Container(height=20),
+                    provider_dropdown,
+                    ft.Container(height=10),
+                    anthropic_key_field,
+                    openai_key_field,
+                    ft.Container(height=20),
+                    save_button,
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                padding=40,
+                alignment=ft.alignment.center,
+            )
+        )
+
+    def _show_settings_screen(self, e=None):
+        """設定画面を表示"""
+        # メインビューを保存
+        if not self.main_view:
+            self.main_view = list(self.page.controls)
+
+        self.page.clean()
+
+        # タイトル
+        title = ft.Text(
+            "設定",
+            size=28,
+            weight=ft.FontWeight.BOLD,
+            color="#1976d2"
+        )
+
+        # 現在の設定を取得
+        config_manager = config.get_config_manager()
+        current_anthropic_key = config_manager.get_anthropic_api_key() or ""
+        current_openai_key = config_manager.get_openai_api_key() or ""
+        current_provider = config_manager.get_ai_provider()
+
+        # プロバイダー選択
+        provider_dropdown = ft.Dropdown(
+            label="AIプロバイダー",
+            options=[
+                ft.dropdown.Option("anthropic", "Anthropic (Claude)"),
+                ft.dropdown.Option("openai", "OpenAI (GPT)"),
+            ],
+            value=current_provider,
+            width=500,
+        )
+
+        # Anthropic APIキー入力フィールド
+        anthropic_key_field = ft.TextField(
+            label="Anthropic APIキー",
+            hint_text="sk-ant-...",
+            value=current_anthropic_key,
+            password=True,
+            can_reveal_password=True,
+            width=500,
+            border_color="#1976d2",
+        )
+
+        # OpenAI APIキー入力フィールド
+        openai_key_field = ft.TextField(
+            label="OpenAI APIキー",
+            hint_text="sk-...",
+            value=current_openai_key,
+            password=True,
+            can_reveal_password=True,
+            width=500,
+            border_color="#1976d2",
+        )
+
+        # モデル選択（プロバイダーに応じて変更）
+        current_model = config_manager.get_ai_model()
+
+        model_dropdown = ft.Dropdown(
+            label="AIモデル",
+            width=500,
+            value=current_model,
+        )
+
+        # プロバイダー変更時の処理
+        def update_model_options():
+            if provider_dropdown.value == "anthropic":
+                model_dropdown.options = [
+                    ft.dropdown.Option("claude-3-5-haiku-20241022", "Claude 3.5 Haiku (高速・低コスト)"),
+                    ft.dropdown.Option("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet (バランス)"),
+                    ft.dropdown.Option("claude-3-opus-20240229", "Claude 3 Opus (高精度)"),
+                ]
+                if model_dropdown.value not in ["claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022", "claude-3-opus-20240229"]:
+                    model_dropdown.value = "claude-3-5-haiku-20241022"
+            else:
+                model_dropdown.options = [
+                    ft.dropdown.Option("gpt-4o-mini", "GPT-4o mini (高速・低コスト)"),
+                    ft.dropdown.Option("gpt-4o", "GPT-4o (バランス)"),
+                    ft.dropdown.Option("gpt-4-turbo", "GPT-4 Turbo (高精度)"),
+                ]
+                if model_dropdown.value not in ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]:
+                    model_dropdown.value = "gpt-4o-mini"
+            self.page.update()
+
+        provider_dropdown.on_change = lambda e: update_model_options()
+        update_model_options()  # 初期表示時に実行
+
+        # 保存ボタン
+        def save_settings(e):
+            provider = provider_dropdown.value
+            anthropic_key = anthropic_key_field.value
+            openai_key = openai_key_field.value
+            model = model_dropdown.value
+
+            # 選択されたプロバイダーのAPIキーを確認
+            if provider == "anthropic" and (not anthropic_key or not anthropic_key.strip()):
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("Anthropic APIキーを入力してください"))
+                )
+                return
+            elif provider == "openai" and (not openai_key or not openai_key.strip()):
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("OpenAI APIキーを入力してください"))
+                )
+                return
+
+            # 設定を保存
+            if config_manager.save_api_settings(
+                anthropic_api_key=anthropic_key.strip() if anthropic_key else None,
+                openai_api_key=openai_key.strip() if openai_key else None,
+                ai_provider=provider,
+                ai_model=model
+            ):
+                # 設定を再読み込み
+                config.reload_config()
+
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("設定を保存しました"))
+                )
+            else:
+                self.page.show_snack_bar(
+                    ft.SnackBar(content=ft.Text("設定の保存に失敗しました"))
+                )
+
+        # 戻るボタン
+        def back_to_main(e):
+            self.page.clean()
+            if self.main_view:
+                for control in self.main_view:
+                    self.page.add(control)
+            self.page.update()
+
+        save_button = ft.ElevatedButton(
+            "保存",
+            icon="save",
+            on_click=save_settings,
+            style=ft.ButtonStyle(
+                color="#ffffff",
+                bgcolor="#1976d2",
+            ),
+        )
+
+        back_button = ft.ElevatedButton(
+            "戻る",
+            icon="arrow_back",
+            on_click=back_to_main,
+            style=ft.ButtonStyle(
+                color="#1976d2",
+                bgcolor="#e3f2fd",
+            ),
+        )
+
+        # 設定ファイルの場所を表示
+        config_location = ft.Text(
+            f"設定ファイル: {config_manager.config_file}",
+            size=12,
+            color="#757575"
+        )
+
+        # レイアウト
+        self.page.add(
+            ft.Container(
+                content=ft.Column([
+                    title,
+                    ft.Divider(),
+                    provider_dropdown,
+                    ft.Container(height=10),
+                    anthropic_key_field,
+                    ft.Container(height=10),
+                    openai_key_field,
+                    ft.Container(height=10),
+                    model_dropdown,
+                    ft.Container(height=10),
+                    ft.Row([save_button, back_button], spacing=10),
+                    ft.Container(height=20),
+                    config_location,
+                ]),
+                padding=40,
+            )
         )
 
 

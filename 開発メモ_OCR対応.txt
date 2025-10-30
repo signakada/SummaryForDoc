@@ -55,14 +55,62 @@
    - JPEGファイルでOCRテスト成功
    - テキスト抽出と要約が正常に動作
 
+## 最新のアップデート（2025-10-30 追加機能）
+
+### APIキー設定画面機能
+1. ✅ 設定ファイルによるAPIキー管理
+   - ユーザーのホームディレクトリに安全に保存
+   - macOS: ~/Library/Application Support/SummaryForDoc/config.json
+   - Windows: %APPDATA%/SummaryForDoc/config.json
+   - .envファイルよりセキュア
+
+2. ✅ 初回起動時の設定画面
+   - APIキーが未設定の場合に自動表示
+   - わかりやすいUI
+
+3. ✅ 設定画面
+   - メイン画面右上の⚙️ボタンからアクセス
+   - APIキーの表示・編集
+   - パスワード表示/非表示の切り替え
+
+### OpenAI API対応
+1. ✅ OpenAI APIキーのサポート
+   - AnthropicとOpenAI両方のAPIキーを設定可能
+   - プロバイダーの選択（Anthropic / OpenAI）
+
+2. ✅ AIモデルの選択
+   - Anthropic: Claude 3.5 Haiku / Sonnet / Opus
+   - OpenAI: GPT-4o mini / GPT-4o / GPT-4 Turbo
+   - プロバイダーに応じて自動でモデル選択肢を切り替え
+
+3. ✅ summarizerのOpenAI統合
+   - 既存のsummarizerはOpenAI APIを完全サポート済み
+   - プロバイダーとモデルの動的切り替え
+
+### カスタムプロンプト機能（基盤）
+1. ✅ ConfigManagerにカスタムプロンプト保存機能を追加
+   - get_custom_prompts()
+   - save_custom_prompt()
+   - delete_custom_prompt()
+
+2. 📝 今後の拡張予定
+   - カスタムプロンプト編集UI
+   - プロンプトテンプレートのインポート/エクスポート
+   - プロンプトライブラリ機能
+
 ## 次回の課題
 
-### 1. デバッグログのクリーンアップ（オプション）
+### 1. カスタムプロンプト編集UI（優先度: 高）
+- 設定画面にカスタムプロンプトタブを追加
+- プロンプトの作成・編集・削除機能
+- メイン画面のテンプレート選択にカスタムプロンプトを追加
+
+### 2. デバッグログのクリーンアップ（オプション）
 - src/file_reader.py の _setup_tesseract() にあるデバッグログを削除するか検討
 - 本番環境では不要だが、トラブルシューティング時には有用
 - 推奨: そのまま残しておく（問題発生時のデバッグに役立つ）
 
-### 2. アプリバンドルの配布準備
+### 3. アプリバンドルの配布準備
 - macOS版アプリの配布方法を検討
 - コード署名（Code Signing）の実施
 - 公証（Notarization）の実施（macOS Catalina以降）
