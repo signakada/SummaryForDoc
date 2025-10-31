@@ -1,0 +1,224 @@
+# Windows版ビルド準備 - 開発記録
+
+## 実施日: 2025-11-01
+
+## 完了した作業
+
+### 1. Windows版Tesseractコピースクリプトの作成
+✅ `copy_tesseract_windows.bat` を作成
+   - Tesseract実行ファイル（tesseract.exe）のコピー
+   - 日本語・英語学習データのコピー
+   - 必要なDLLファイルの自動コピー
+   - エラーチェックと詳細なメッセージ表示
+   - 標準インストール先: `C:\Program Files\Tesseract-OCR`
+
+### 2. file_reader.pyのWindows対応
+✅ `src/file_reader.py` の `_setup_tesseract()` メソッドを修正
+   - **変更箇所**: 行20-64
+   - プラットフォーム検出機能を追加（`sys.platform`）
+   - Windows環境: `tesseract.exe` を使用
+   - macOS/Linux環境: `tesseract` を使用
+   - デバッグログにプラットフォーム情報を追加
+
+**修正内容の詳細:**
+```python
+# プラットフォームに応じた実行ファイル名を設定
+if sys.platform == 'win32':
+    # Windows版
+    tesseract_exe = 'tesseract.exe'
+    tesseract_cmd = base_path / 'tesseract' / tesseract_exe
+else:
+    # macOS/Linux版
+    tesseract_exe = 'tesseract'
+    tesseract_cmd = base_path / 'tesseract' / tesseract_exe
+```
+
+### 3. Windows版ビルド手順書の作成
+✅ `WINDOWS_BUILD.md` を作成
+   - 前提条件（Python、Tesseractのインストール手順）
+   - ビルド手順（詳細なステップバイステップガイド）
+   - トラブルシューティング（よくあるエラーと解決方法）
+   - ビルド構成とディレクトリ構造
+
+### 4. flet-cliのセットアップ
+✅ flet-cliパッケージの再インストール
+   - バージョン: 0.28.3
+   - インストール先: `C:\Users\signakada\AppData\Roaming\Python\Python314\Scripts\flet.exe`
+   - Flutter 3.29.2が自動インストールされた
+
+## 発生した問題と対応
+
+### 問題1: UNCパスの制限（未解決）
+**症状:**
+- プロジェクトディレクトリが `\\psf\Home\Documents\...` というUNCパス（Parallels Desktopのマウントポイント）にあるため、Windows CMD.EXEとfletビルドツールが正しく動作しない
+- エラーメッセージ: "UNC paths are not supported. Defaulting to Windows directory."
+
+**原因:**
+- Parallels Desktop経由でmacOSのディレクトリをWindowsにマウント
+- Windows CMDはUNCパスをカレントディレクトリとして使用できない
+- fletビルドツールもUNCパスに対応していない
+
+**試した解決策（すべて失敗）:**
+1. ❌ robocopyでローカルドライブにコピー → UNCパス問題で失敗
+2. ❌ PowerShellでコピー → パスの認識に失敗
+3. ❌ substコマンドでドライブマッピング → UNCパスからのsubstは非サポート
+4. ❌ C:\temp や C:\Users\signakada\Documents にコピー → これらもParallelsのマウントポイントだった
+
+**推奨される解決策:**
+Windows側で直接作業する必要がある：
+1. Windowsエクスプローラーで手動コピー: `\\psf\...` → `C:\dev\SummaryForDoc`
+2. `build`フォルダは除外（macOS用ビルドファイル）
+3. Windows側のPowerShellまたはコマンドプロンプトから作業
+
+### 問題2: Visual Studioのコンポーネント不足
+**症状:**
+Flutter doctorの診断で以下のコンポーネントが不足していることが判明：
+- MSVC v142 - VS 2019 C++ x64/x86 build tools
+- C++ CMake tools for Windows
+- Windows 10 SDK
+
+**状態:**
+未対応（Windows版ビルドには必要だが、警告のみでビルドは可能な可能性あり）
+
+**対応方法:**
+Visual Studio Installer を起動し、以下のワークロードとコンポーネントを追加インストール：
+- 「Desktop development with C++」ワークロード
+- MSVC v142ビルドツール
+- C++ CMakeツール
+- Windows 10 SDK
+
+## 次回のタスク
+
+### 優先度: 高
+
+#### 1. Windows側でプロジェクトをセットアップ
+**手順:**
+1. Windowsエクスプローラーで `\\psf\Home\Documents\自作アプリ\SummaryForDoc` を開く
+2. すべてのファイル・フォルダを選択（**buildフォルダは除外**）
+3. `C:\dev\SummaryForDoc` にコピー
+4. PowerShellまたはコマンドプロンプトで `C:\dev\SummaryForDoc` に移動
+
+#### 2. Windows版アプリのビルド
+**コマンド（PowerShell）:**
+```powershell
+cd C:\dev\SummaryForDoc
+
+# PATH環境変数にfletコマンドを追加
+$env:PATH += ";$env:APPDATA\Python\Python314\Scripts"
+
+# ビルド実行
+flet build windows
+```
+
+または
+
+**コマンド（コマンドプロンプト）:**
+```cmd
+cd C:\dev\SummaryForDoc
+
+# 絶対パスでfletコマンドを実行
+%APPDATA%\Python\Python314\Scripts\flet.exe build windows
+```
+
+#### 3. Tesseractの統合
+```cmd
+copy_tesseract_windows.bat
+```
+
+#### 4. 動作確認
+```cmd
+cd build\windows
+SummaryForDoc.exe
+```
+
+### 優先度: 中
+
+#### 5. Visual Studio C++コンポーネントのインストール（オプション）
+Windows開発を本格的に行う場合は推奨
+
+#### 6. macOS版とWindows版の動作確認
+両プラットフォームで以下を確認：
+- [ ] テキストファイルの読み込みと要約
+- [ ] PDFファイルの読み込みと要約
+- [ ] 画像ファイル（JPEG/PNG）のOCR処理と要約
+- [ ] カスタムプロンプト機能
+- [ ] API設定（Anthropic/OpenAI切り替え）
+
+## 技術的メモ
+
+### Parallels Desktop環境での開発の制約
+- **UNCパス問題**: Parallels Desktopでマウントされたディレクトリは `\\psf\...` というUNCパスになる
+- **Windows開発ツールの制限**: 多くのWindowsネイティブツール（CMD、robocopy、subst等）はUNCパスに対応していない
+- **解決策**: Windows側のローカルディスク（C:ドライブ）にプロジェクトをコピーして作業
+
+### Fletのビルド環境
+- **Python**: 3.14.0
+- **Flet**: 0.28.3
+- **Flutter**: 3.29.2（自動インストール済み）
+- **ビルド先**: `build/windows/`
+
+### Windows版のビルド構造（予定）
+```
+build/windows/
+├── SummaryForDoc.exe      # メイン実行ファイル
+├── data/                   # Fletのリソース
+└── tesseract/              # Tesseract統合（copy_tesseract_windows.batで追加）
+    ├── tesseract.exe       # Tesseract実行ファイル
+    ├── tessdata/           # 学習データ
+    │   ├── eng.traineddata # 英語
+    │   └── jpn.traineddata # 日本語
+    ├── libtesseract-5.dll  # Tesseract本体DLL
+    ├── libleptonica-*.dll  # 画像処理ライブラリ
+    └── その他の依存DLL
+```
+
+## 関連ファイル
+
+### 新規作成ファイル
+- `copy_tesseract_windows.bat` - Windows版Tesseractコピースクリプト
+- `WINDOWS_BUILD.md` - Windows版ビルド手順書
+- `開発メモ_Windows版ビルド準備.txt` - 本ファイル
+
+### 修正ファイル
+- `src/file_reader.py` (行20-64) - Windows対応の追加
+
+### 参考ファイル
+- `copy_tesseract.sh` - macOS版Tesseractコピースクリプト（参考用）
+- `開発メモ_OCR対応.txt` - macOS版の開発記録
+- `開発メモ_カスタムプロンプト機能.txt` - カスタムプロンプト機能の開発記録
+
+## 現在の状況サマリー
+
+### ✅ 完了
+- [x] Windows版Tesseractコピースクリプト作成
+- [x] file_reader.pyのWindows対応
+- [x] Windows版ビルド手順書作成
+- [x] flet-cliのインストールとセットアップ
+- [x] Flutter環境のセットアップ
+
+### 🚧 進行中
+- [ ] Windows版アプリのビルド（UNCパス問題で保留）
+
+### 📋 未着手
+- [ ] Windows側でのプロジェクトセットアップ
+- [ ] Tesseractの統合テスト
+- [ ] Windows版アプリの動作確認
+- [ ] Visual Studio C++コンポーネントのインストール（オプション）
+
+## 次回セッション開始時の手順
+
+1. **Windows PowerShellまたはコマンドプロンプトを開く**
+2. **プロジェクトをC:ドライブにコピー**（Windowsエクスプローラーで手動）
+3. **`C:\dev\SummaryForDoc`に移動**
+4. **`WINDOWS_BUILD.md`の手順に従ってビルドを実行**
+5. **動作確認**
+
+---
+
+**重要**: Parallels Desktop環境では、必ずWindows側のローカルディスク（C:ドライブ）で作業してください。UNCパス（`\\psf\...`）では多くのWindowsツールが正しく動作しません。
+
+## 参考リンク
+
+- [Tesseract for Windows](https://github.com/UB-Mannheim/tesseract/wiki)
+- [Flet公式ドキュメント](https://flet.dev)
+- [Flutter公式サイト](https://flutter.dev)

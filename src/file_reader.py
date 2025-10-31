@@ -22,6 +22,7 @@ class FileReader:
         print(f"DEBUG: sys.frozen = {getattr(sys, 'frozen', False)}")
         print(f"DEBUG: hasattr(sys, '_MEIPASS') = {hasattr(sys, '_MEIPASS')}")
         print(f"DEBUG: sys.executable = {sys.executable}")
+        print(f"DEBUG: platform = {sys.platform}")
 
         # アプリバンドル内のTesseractパスを探す
         if getattr(sys, 'frozen', False):
@@ -29,7 +30,18 @@ class FileReader:
             base_path = Path(sys._MEIPASS) if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
             print(f"DEBUG: base_path = {base_path}")
 
-            tesseract_cmd = base_path / 'tesseract' / 'tesseract'
+            # プラットフォームに応じた実行ファイル名を設定
+            if sys.platform == 'win32':
+                # Windows版
+                tesseract_exe = 'tesseract.exe'
+                # Windows版のビルド構造: 実行ファイルと同じディレクトリにtesseractフォルダ
+                tesseract_cmd = base_path / 'tesseract' / tesseract_exe
+            else:
+                # macOS/Linux版
+                tesseract_exe = 'tesseract'
+                # macOS版のビルド構造: Contents/Resources/tesseract/
+                tesseract_cmd = base_path / 'tesseract' / tesseract_exe
+
             tessdata_dir = base_path / 'tesseract' / 'tessdata'
 
             print(f"DEBUG: tesseract_cmd = {tesseract_cmd}")
